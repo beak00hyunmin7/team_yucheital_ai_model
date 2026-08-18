@@ -1,0 +1,71 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+
+// 96x96 격자, 물리 크기 1km x 1km (dx=1000/96≈10.42m) -- 배수관 배치 결정에
+// 필요한 유역 맥락(집수구역 전체)을 담기 위한 크기. 격자 셀 개수는 그대로라
+// 계산 비용은 384m 버전과 동일함.
+// 평평한 박스를 먼저 만든 뒤 warp_terrain_real.py로 지형을 따라가게 변형한다.
+// 지형 위 공기층: 1m (침수심이 수십cm를 넘기 어려운 소유역 특성상 충분)
+
+convertToMeters 1;
+
+vertices
+(
+    (0     0     0)
+    (1000  0     0)
+    (1000  1000  0)
+    (0     1000  0)
+    (0     0     1)
+    (1000  0     1)
+    (1000  1000  1)
+    (0     1000  1)
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (96 96 10) simpleGrading (1 1 1)
+);
+
+edges
+(
+);
+
+boundary
+(
+    terrain
+    {
+        type wall;
+        faces
+        (
+            (0 3 2 1)
+        );
+    }
+    atmosphere
+    {
+        type patch;
+        faces
+        (
+            (4 7 6 5)
+        );
+    }
+    sides
+    {
+        type patch;
+        faces
+        (
+            (0 4 7 3)
+            (2 6 5 1)
+            (1 5 4 0)
+            (3 7 6 2)
+        );
+    }
+);
+
+mergePatchPairs
+(
+);

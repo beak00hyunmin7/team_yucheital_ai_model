@@ -1,0 +1,26 @@
+# 등고선 이미지 -> 배수 시뮬레이션 이미지 학습 설정
+# 경로는 모두 ai_model/ 디렉터리에서 실행한다고 가정한 상대경로입니다.
+
+contours_dir: "data/contours"   # 입력: 등고선 이미지 (나중에 채워 넣을 예정)
+flow_dir: "data/flow"           # 타깃: 배수 시뮬레이션 결과 이미지 (같은 파일명으로 대응)
+
+image_size: 256      # 2^n 배수 필수 (64/128/256 권장)
+val_split: 0.15
+seed: 42
+
+mode: "unet"          # "unet": 오토인코더(U-Net)만 L1 손실로 학습 / "gan": pix2pix(U-Net+PatchGAN)
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0      # gan 모드에서 L1 재구성 손실 가중치
+gan_loss: "vanilla"   # "vanilla"(BCE) | "lsgan"(MSE)  -- mode: gan일 때만 사용
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30            # 조기 종료: val L1이 이 epoch 수만큼 개선 안 되면 중단
+
+checkpoint_dir: "checkpoints"
+output_dir: "outputs"

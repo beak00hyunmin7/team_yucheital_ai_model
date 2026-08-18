@@ -1,0 +1,30 @@
+# 국가기본도 등고선 원본 (21GB, 별도 보관 - git 대상 아님)
+국가기본도_등고선/
+국가기본도_등고선.zip
+국가기본도_등고선_테이블정의서.xlsx
+
+# 포인트클라우드 / 생성된 지형·시뮬레이션 데이터셋 (npy, 대용량)
+**/pointcloud.npy
+seoulTerrain/dataset/
+seoulOpenFOAMDataset/dataset/
+seoulOpenFOAMDataset/staging/
+busanOpenFOAMDataset/dataset/
+busanOpenFOAMDataset/staging/
+gangwonOpenFOAMDataset/dataset/
+gangwonOpenFOAMDataset/staging/
+**/work/
+terrainFlowSim/dataset/
+terrainFlowSim/ai_model/data/
+
+# 학습 체크포인트 / 산출물 (수십GB)
+terrainFlowSim/ai_model/checkpoints*/
+terrainFlowSim/ai_model/outputs*/
+terrainFlowSim/ai_model/deploy_package/checkpoints/
+
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# 기타 대용량/개인 파일
+*.pdf

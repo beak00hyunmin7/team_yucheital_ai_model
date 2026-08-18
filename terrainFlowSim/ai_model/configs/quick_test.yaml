@@ -1,0 +1,25 @@
+# 파이프라인 동작 확인용 짧은 학습 설정 (config.yaml과 동일하되 epochs만 축소)
+# CPU 환경에서 체크포인트 하나 빨리 뽑아보는 용도. 본 학습은 config.yaml 사용.
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+batch_size: 4
+num_workers: 2
+epochs: 10
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 5
+sample_epoch_freq: 2
+log_iter_freq: 5
+
+checkpoint_dir: "checkpoints"
+output_dir: "outputs"

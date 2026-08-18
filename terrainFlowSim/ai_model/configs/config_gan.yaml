@@ -1,0 +1,26 @@
+# 등고선 이미지 -> 배수 시뮬레이션 이미지 학습 설정 (GAN 모드, config.yaml과 비교용)
+# 경로는 모두 ai_model/ 디렉터리에서 실행한다고 가정한 상대경로입니다.
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "gan"           # pix2pix(U-Net 생성자 + PatchGAN 판별자)
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_gan"
+output_dir: "outputs_gan"

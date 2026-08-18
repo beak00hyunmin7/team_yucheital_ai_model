@@ -1,0 +1,9 @@
+torch>=2.1.0
+torchvision>=0.16.0
+numpy>=1.24
+pillow>=10.0
+opencv-python>=4.8
+pyyaml>=6.0
+tqdm>=4.66
+matplotlib>=3.7   # scripts/render_from_openfoam.py, generate_dataset.py 데이터 준비 단계에서만 사용 (학습/추론에는 불필요)
+scipy>=1.10       # scripts/generate_dataset.py의 지형 스무딩(gaussian_filter)에서만 사용
