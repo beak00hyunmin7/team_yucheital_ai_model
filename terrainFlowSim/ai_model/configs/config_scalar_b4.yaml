@@ -1,0 +1,28 @@
+# B4: 흐름누적 입력 채널.
+#   입력 = [정규화 고도, log(D8 흐름누적)]  (2채널)
+#   나머지는 B1 과 동일 (ref 1mm, wet_weight 8, GAN/grad 없음)
+# 전제: build_scalar_dataset.py --add-flowacc  +  --stats-only --depth-ref-mm 1.0
+
+data_root: "data_scalar"
+image_size: 128
+ngf: 32
+seed: 42
+
+use_flowacc: true
+
+batch_size: 16
+num_workers: 2
+epochs: 300
+lr: 0.0002
+beta1: 0.5
+
+wet_weight: 8.0
+grad_weight: 0.0
+gan_weight: 0.0
+
+save_epoch_freq: 25
+sample_epoch_freq: 5
+patience: 40
+
+checkpoint_dir: "checkpoints_scalar_b4"
+output_dir: "outputs_scalar_b4"

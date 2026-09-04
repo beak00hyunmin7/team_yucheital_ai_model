@@ -34,13 +34,27 @@ def main(cfg):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device: {device}")
 
+    rain_dir = cfg.get("rain_dir")  # 주면 등고선(3채널)+강우(1채널)=4채널 입력 (채널 결합 방식)
+    rain_values_json = cfg.get("rain_values_json")  # 주면 강우량을 FiLM 조건 스칼라로 사용
+    time_values_json = cfg.get("time_values_json")  # 주면 시뮬레이션 경과 시점도 FiLM 조건 스칼라로 사용
+    use_film = bool(rain_values_json or time_values_json)
+    # cond_dim: rain/time 중 실제로 켜진 조건 개수만큼 (둘 다 켜면 2, 하나만 켜면 1)
+    cond_dim = int(bool(rain_values_json)) + int(bool(time_values_json))
+    if cond_dim == 0:
+        cond_dim = 1  # use_film=False라 실제로 안 쓰이지만 생성자 인자 형식상 기본값
+    in_channels = cfg.get("in_channels", 4 if rain_dir else 3)
+
     train_names, val_names = split_train_val(
         cfg["contours_dir"], cfg["flow_dir"], val_split=cfg["val_split"], seed=cfg["seed"]
     )
     train_set = ContourFlowDataset(cfg["contours_dir"], cfg["flow_dir"],
-                                    image_size=cfg["image_size"], augment=True, names=train_names)
+                                    image_size=cfg["image_size"], augment=True, names=train_names,
+                                    rain_dir=rain_dir, rain_values_json=rain_values_json,
+                                    time_values_json=time_values_json)
     val_set = ContourFlowDataset(cfg["contours_dir"], cfg["flow_dir"],
-                                  image_size=cfg["image_size"], augment=False, names=val_names) \
+                                  image_size=cfg["image_size"], augment=False, names=val_names,
+                                  rain_dir=rain_dir, rain_values_json=rain_values_json,
+                                  time_values_json=time_values_json) \
         if val_names else None
 
     train_loader = DataLoader(train_set, batch_size=cfg["batch_size"], shuffle=True,
@@ -48,12 +62,16 @@ def main(cfg):
     val_loader = DataLoader(val_set, batch_size=cfg["batch_size"], shuffle=False,
                              num_workers=cfg["num_workers"]) if val_set else None
 
-    print(f"train samples: {len(train_set)}, val samples: {len(val_set) if val_set else 0}")
+    cond_note = " (강우 조건 포함, rain_dir=" + str(rain_dir) + ")" if rain_dir else \
+        (f" (FiLM 조건 {cond_dim}차원: rain={bool(rain_values_json)}, time={bool(time_values_json)})"
+         if use_film else "")
+    print(f"train samples: {len(train_set)}, val samples: {len(val_set) if val_set else 0}, "
+          f"in_channels: {in_channels}{cond_note}")
 
     model = TranslationModel(
-        mode=cfg["mode"], in_channels=3, out_channels=3, image_size=cfg["image_size"],
+        mode=cfg["mode"], in_channels=in_channels, out_channels=3, image_size=cfg["image_size"],
         lr=cfg["lr"], beta1=cfg["beta1"], lambda_l1=cfg["lambda_l1"], gan_loss=cfg["gan_loss"],
-        device=device,
+        device=device, use_film=use_film, cond_dim=cond_dim, ngf=cfg.get("ngf", 64),
     )
 
     os.makedirs(cfg["checkpoint_dir"], exist_ok=True)
@@ -77,8 +95,32 @@ def main(cfg):
     # 조기 종료: sample_epoch_freq마다 검증해서 patience 동안 개선이 없으면 멈춤
     patience = cfg.get("patience", 30)
 
+    # 학습률 선형 감소 (pix2pix 표준 기법): lr_decay_start epoch까지는 고정,
+    # 그 이후 epochs까지 선형으로 0에 가깝게 줄인다. GAN 모드에서 판별자가
+    # 생성자를 압도하는 문제 완화에 도움이 될 수 있다.
+    lr_decay_start = cfg.get("lr_decay_start", None)
+
+    def lr_factor(epoch):
+        if not lr_decay_start or epoch <= lr_decay_start:
+            return 1.0
+        total_decay_epochs = max(1, cfg["epochs"] - lr_decay_start)
+        return max(0.0, 1.0 - (epoch - lr_decay_start) / total_decay_epochs)
+
+    def apply_lr(epoch):
+        factor = lr_factor(epoch)
+        for pg in model.optimizer_G.param_groups:
+            pg["lr"] = cfg["lr"] * factor
+        if model.optimizer_D is not None:
+            for pg in model.optimizer_D.param_groups:
+                pg["lr"] = cfg["lr"] * factor
+        return factor
+
     global_step = 0
     for epoch in range(start_epoch, cfg["epochs"] + 1):
+        lr_now_factor = apply_lr(epoch)
+        if lr_decay_start and epoch % cfg["sample_epoch_freq"] == 0:
+            print(f"[epoch {epoch}] lr = {cfg['lr'] * lr_now_factor:.6f}")
+
         pbar = tqdm(train_loader, desc=f"epoch {epoch}/{cfg['epochs']}")
         for batch in pbar:
             model.set_input(batch)
@@ -139,7 +181,8 @@ def save_sample(model, val_loader, output_dir, epoch):
     model.set_input(batch)
     model.forward()
     path = os.path.join(output_dir, f"sample_epoch_{epoch:04d}.png")
-    save_triplet_png(model.real_input[0], model.fake_target[0], model.real_target[0], path)
+    # real_input이 4채널(등고선+강우)이어도 미리보기는 등고선(RGB) 부분만 보여준다.
+    save_triplet_png(model.real_input[0][:3], model.fake_target[0], model.real_target[0], path)
     model.netG.train()
 
 

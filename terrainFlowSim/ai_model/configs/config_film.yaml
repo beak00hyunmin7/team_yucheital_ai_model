@@ -1,0 +1,28 @@
+# 강우 조건화 실험 v2: FiLM 방식. config_raincond.yaml(입력 채널에 강우 얹기)이
+# 강우를 거의 무시하는 것으로 확인되어, 대신 강우량을 병목(bottleneck) 특징맵에
+# 채널별 scale/shift로 직접 주입한다 (입력은 다시 등고선 3채널만).
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"   # 이 줄이 있으면 자동으로 FiLM 사용
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_film"
+output_dir: "outputs_film"

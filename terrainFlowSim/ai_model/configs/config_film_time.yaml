@@ -1,0 +1,32 @@
+# 강우 조건화 실험 v3: FiLM + 시점(time) 조건 추가 (cond_dim=2).
+# v2(config_film.yaml, 강우만 FiLM)이 강우 변형 데이터 부족(7%)으로 강우량을
+# 거의 무시하는 것으로 확인됨. 이번엔 (1) 강우 변형 데이터를 94% 커버리지까지
+# 확충하고, (2) 같은 지형·같은 강우량이라도 시점(t)에 따라 답이 달라지게
+# 만들어 조건을 무시하는 지름길 자체를 막는 두 가지를 함께 적용한다.
+# time_values_json이 rain_values_json과 함께 있으면 cond = [rain_norm, time_norm].
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"
+time_values_json: "data/time_values.json"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_film_time"
+output_dir: "outputs_film_time"

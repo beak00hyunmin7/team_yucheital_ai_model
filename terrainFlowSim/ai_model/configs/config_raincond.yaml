@@ -1,0 +1,29 @@
+# 강우 조건을 입력에 추가한 실험 (config.yaml/U-Net 대비 변경점: in_channels 3->4,
+# 등고선(3채널) + 강우량 채널(1채널) 입력). mode: unet으로 먼저 순수 비교
+# (U-Net 베이스라인 val L1 0.0770과 공정하게 비교하기 위해 GAN 요소 배제).
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_dir: "data/rain"     # 이 줄이 있으면 자동으로 in_channels=4가 됨
+in_channels: 4
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_raincond"
+output_dir: "outputs_raincond"

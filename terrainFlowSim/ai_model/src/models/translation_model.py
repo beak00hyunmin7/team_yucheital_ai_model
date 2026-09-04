@@ -17,17 +17,21 @@ from src.models.discriminator import NLayerDiscriminator
 
 class TranslationModel:
     def __init__(self, mode="unet", in_channels=3, out_channels=3, image_size=256,
-                 lr=0.0002, beta1=0.5, lambda_l1=100.0, gan_loss="vanilla", device="cpu"):
+                 lr=0.0002, beta1=0.5, lambda_l1=100.0, gan_loss="vanilla", device="cpu",
+                 use_film=False, cond_dim=1, ngf=64):
         self.mode = mode
         self.device = device
         self.lambda_l1 = lambda_l1
+        self.use_film = use_film
 
         self.netG = UnetGenerator(in_channels=in_channels, out_channels=out_channels,
-                                   image_size=image_size).to(device)
+                                   image_size=image_size, ngf=ngf, use_film=use_film,
+                                   cond_dim=cond_dim).to(device)
         self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=lr, betas=(beta1, 0.999))
         self.criterion_l1 = nn.L1Loss()
 
         self.netD = None
+        self.optimizer_D = None
         if mode == "gan":
             self.netD = NLayerDiscriminator(in_channels=in_channels + out_channels).to(device)
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=lr, betas=(beta1, 0.999))
@@ -36,9 +40,10 @@ class TranslationModel:
     def set_input(self, batch):
         self.real_input = batch["input"].to(self.device)
         self.real_target = batch["target"].to(self.device)
+        self.real_cond = batch["cond"].to(self.device) if "cond" in batch else None
 
     def forward(self):
-        self.fake_target = self.netG(self.real_input)
+        self.fake_target = self.netG(self.real_input, self.real_cond)
 
     def _gan_target(self, pred, is_real):
         label = torch.ones_like(pred) if is_real else torch.zeros_like(pred)

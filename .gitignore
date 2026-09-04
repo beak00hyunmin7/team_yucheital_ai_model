@@ -28,3 +28,12 @@ terrainFlowSim/ai_model/deploy_package/checkpoints/
 
 # 기타 대용량/개인 파일
 *.pdf
+
+# 학습/전처리 로그 (수 MB~수십 MB, tqdm 진행바 때문에 매우 큼)
+*.log
+
+# 배포 패키지 압축본 (체크포인트 포함, 500MB+)
+terrainFlowSim/ai_model/deploy_package.zip
+
+# 스칼라 실험용 생성 데이터
+terrainFlowSim/ai_model/data_scalar/

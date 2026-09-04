@@ -1,0 +1,26 @@
+# B2: 레버 2 — B1(ref 1mm + wet_weight 8) 에 PatchGAN adversarial 손실 추가.
+# L1 만으로는 못 만드는 가는 배수 채널 구조를 판별자가 유도한다 (LSGAN).
+# 전제: build_scalar_dataset.py --stats-only --depth-ref-mm 1.0 로 정규화 상태 유지.
+
+data_root: "data_scalar"
+image_size: 128
+ngf: 32
+ndf: 32
+seed: 42
+
+batch_size: 16
+num_workers: 2
+epochs: 250
+lr: 0.0002
+beta1: 0.5
+
+wet_weight: 8.0
+grad_weight: 0.0
+gan_weight: 0.5
+
+save_epoch_freq: 25
+sample_epoch_freq: 5
+patience: 40
+
+checkpoint_dir: "checkpoints_scalar_b2"
+output_dir: "outputs_scalar_b2"
