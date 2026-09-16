@@ -1,26 +1,39 @@
 @echo off
-REM ì˜ˆì¸¡ ë°°ìˆ˜ë§µ ì›¹ ì‹¤í–‰ (Windows)
-REM   - ai_model\.venv ì¬ì‚¬ìš©
-REM   - íšŒì›ê°€ì…/ë¡œê·¸ì¸ìš© MySQL(MariaDB)ì€ WSL Ubuntu ì•ˆì—ì„œ êµ¬ë™
+REM ¿¹Ãø ¹è¼ö¸Ê À¥ ½ÇÇà (Windows)
+REM   - ai_model\.venv Àç»ç¿ë
+REM   - È¸¿ø°¡ÀÔ/·Î±×ÀÎ¿ë MySQL(MariaDB)Àº WSL Ubuntu ¾È¿¡¼­ ±¸µ¿
 
 setlocal
 cd /d "%~dp0"
 
 set VENV_PY=..\ai_model\.venv\Scripts\python.exe
 if not exist "%VENV_PY%" (
-  echo [ì˜¤ë¥˜] ..\ai_model\.venv ë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.
+  echo [¿À·ù] ..\ai_model\.venv ¸¦ Ã£À» ¼ö ¾ø½À´Ï´Ù.
   pause
   exit /b 1
 )
 
-echo [1/3] WSL MariaDB ì‹œì‘...
+echo [1/3] WSL MariaDB ½ÃÀÛ...
 wsl -d Ubuntu-22.04 -u root -- service mariadb start 2>nul
-if errorlevel 1 echo   (WSL/MariaDB ì—†ìŒ - ì¸ì¦ ì—†ì´ ì˜ˆì¸¡ë§Œ ë™ì‘í•©ë‹ˆë‹¤)
+if errorlevel 1 (
+  echo   (WSL/MariaDB ¾øÀ½ - ÀÎÁõ ¾øÀÌ ¿¹Ãø¸¸ µ¿ÀÛÇÕ´Ï´Ù)
+) else (
+  REM MariaDB ´Â ±âµ¿¿¡ ¸î ÃÊ °É¸°´Ù. ¹Ù·Î ¼­¹ö¸¦ ¶ç¿ì¸é init_db °¡ ½ÇÆĞÇØ¼­
+  REM ÀÎÁõÀÌ ²¨Áø Ã¤ ¶ß°Å³ª, ÄÑÁø Ã¤ ·Î±×ÀÎÀÌ ¾È µÇ´Â ¾îÁ¤ÂÄÇÑ »óÅÂ°¡ µÈ´Ù.
+  REM ÀÀ´äÇÒ ¶§±îÁö ÃÖ´ë 20ÃÊ ±â´Ù¸°´Ù.
+  echo   MariaDB ÁØºñ ´ë±â Áß...
+  for /L %%i in (1,1,20) do (
+    wsl -d Ubuntu-22.04 -u root -- mysqladmin --silent ping >nul 2>&1 && goto :db_ready
+    timeout /t 1 /nobreak >nul
+  )
+  echo   (°æ°í: MariaDB °¡ 20ÃÊ ¾È¿¡ ÀÀ´äÇÏÁö ¾Ê¾Ò½À´Ï´Ù - ·Î±×ÀÎÀÌ ¾È µÉ ¼ö ÀÖ½À´Ï´Ù)
+  :db_ready
+)
 
-echo [2/3] ì›¹ ì„œë²„ ì˜ì¡´ì„± í™•ì¸...
+echo [2/3] À¥ ¼­¹ö ÀÇÁ¸¼º È®ÀÎ...
 "%VENV_PY%" -m pip install -q -r backend\requirements.txt
 
-echo [3/3] ì„œë²„ ì‹œì‘: http://127.0.0.1:8000
+echo [3/3] ¼­¹ö ½ÃÀÛ: http://127.0.0.1:8000
 "%VENV_PY%" -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000
 
 endlocal

@@ -1,0 +1,28 @@
+# 자동 생성 (scripts/scaling_study.py). 기반: config_p2_wet8.yaml
+# 학습 지형 수 = 150 외에는 기반 config 와 동일.
+# 직접 수정하지 말고 기반 config 를 고친 뒤 다시 생성할 것.
+
+contours_dir: data/contours
+flow_dir: data/flow
+rain_values_json: data/rain_values.json
+time_values_json: data/time_values.json
+image_size: 128
+ngf: 32
+val_split: 0.15
+seed: 42
+mode: unet
+gan_loss: lsgan
+batch_size: 16
+num_workers: 4
+epochs: 30
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+wet_weight: 8.0
+save_epoch_freq: 10
+sample_epoch_freq: 2
+log_iter_freq: 200
+patience: 10
+checkpoint_dir: checkpoints_scale150
+output_dir: outputs_scale150
+max_train_groups: 150

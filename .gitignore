@@ -37,3 +37,5 @@ terrainFlowSim/ai_model/deploy_package.zip
 
 # 스칼라 실험용 생성 데이터
 terrainFlowSim/ai_model/data_scalar/
+terrainFlowSim/webapp/run_windows.bat.bak
+*.bak

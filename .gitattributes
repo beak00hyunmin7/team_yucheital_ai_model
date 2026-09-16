@@ -1,0 +1,4 @@
+# 배치 파일은 반드시 CRLF 로 체크아웃돼야 한다.
+# LF 로 내려가면 cmd.exe 가 줄을 잘못 잘라서 실행 자체가 깨진다
+# (2026-09-16 실제로 발생: run_windows.bat 이 LF+UTF-8 이라 한글이 깨지고 실행 불가).
+*.bat text eol=crlf

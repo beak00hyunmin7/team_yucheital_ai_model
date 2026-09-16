@@ -18,11 +18,12 @@ from src.models.discriminator import NLayerDiscriminator
 class TranslationModel:
     def __init__(self, mode="unet", in_channels=3, out_channels=3, image_size=256,
                  lr=0.0002, beta1=0.5, lambda_l1=100.0, gan_loss="vanilla", device="cpu",
-                 use_film=False, cond_dim=1, ngf=64):
+                 use_film=False, cond_dim=1, ngf=64, wet_weight=1.0):
         self.mode = mode
         self.device = device
         self.lambda_l1 = lambda_l1
         self.use_film = use_film
+        self.wet_weight = wet_weight
 
         self.netG = UnetGenerator(in_channels=in_channels, out_channels=out_channels,
                                    image_size=image_size, ngf=ngf, use_film=use_film,
@@ -36,6 +37,26 @@ class TranslationModel:
             self.netD = NLayerDiscriminator(in_channels=in_channels + out_channels).to(device)
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=lr, betas=(beta1, 0.999))
             self.criterion_gan = nn.MSELoss() if gan_loss == "lsgan" else nn.BCEWithLogitsLoss()
+
+    def _l1(self, fake, real):
+        """젖은 픽셀에 가중치를 준 L1.
+
+        타깃(수심 RGB)에서 물이 있는 영역은 전체 픽셀의 소수라, 균등 L1은 얇은
+        배수채널을 뭉개고 배경을 맞추는 쪽이 이득이다. 실제로 v5는 학습에 쓴
+        지형에서조차 최대 수심을 절반으로 예측한다(IMPROVEMENT_GUIDE.md Phase 0-B).
+
+        Blues 컬러맵은 마름=흰색(R≈0.97) -> 깊음=진파랑(R≈0.03)으로 R채널이 단조
+        감소하므로 `wetness = 1 - R` 을 "얼마나 젖었나"의 대리값으로 쓴다.
+
+        가중치 평균으로 나눠서 손실의 절대 크기를 균등 L1과 같은 스케일로 유지한다.
+        이렇게 해야 lambda_l1 을 건드리지 않고 baseline 과 공정하게 비교할 수 있다
+        (가중치가 크기를 키우는 게 아니라 페널티를 재배분하기만 한다).
+        """
+        if self.wet_weight <= 1.0:
+            return self.criterion_l1(fake, real)
+        wetness = 1.0 - (real[:, 0:1] + 1.0) * 0.5          # [-1,1] -> [0,1], 흰색=0
+        w = 1.0 + (self.wet_weight - 1.0) * wetness.clamp(0.0, 1.0)
+        return ((fake - real).abs() * w).mean() / w.mean()
 
     def set_input(self, batch):
         self.real_input = batch["input"].to(self.device)
@@ -74,7 +95,7 @@ class TranslationModel:
             fake_pair = torch.cat([self.real_input, self.fake_target], dim=1)
             pred_fake = self.netD(fake_pair)
             loss_g_gan = self.criterion_gan(pred_fake, self._gan_target(pred_fake, True))
-            loss_g_l1 = self.criterion_l1(self.fake_target, self.real_target) * self.lambda_l1
+            loss_g_l1 = self._l1(self.fake_target, self.real_target) * self.lambda_l1
             loss_g = loss_g_gan + loss_g_l1
             loss_g.backward()
             self.optimizer_G.step()
@@ -83,7 +104,7 @@ class TranslationModel:
         else:
             # 순수 오토인코더(U-Net) 모드: L1 재구성 손실만 사용
             self.optimizer_G.zero_grad()
-            loss_g_l1 = self.criterion_l1(self.fake_target, self.real_target)
+            loss_g_l1 = self._l1(self.fake_target, self.real_target)
             loss_g_l1.backward()
             self.optimizer_G.step()
             losses["loss_G_l1"] = loss_g_l1.item()

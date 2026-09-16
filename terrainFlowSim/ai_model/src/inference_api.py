@@ -69,7 +69,11 @@ def normalize_time(t_s):
 
 DEFAULT_CHECKPOINT = os.path.join(os.path.dirname(__file__), "..", "checkpoints", "best.pt")
 CHECKPOINT_PATH = os.environ.get("AI_MODEL_CHECKPOINT", DEFAULT_CHECKPOINT)
-IMAGE_SIZE = int(os.environ.get("AI_MODEL_IMAGE_SIZE", "256"))
+# 학습 해상도는 체크포인트 구조에서 자동 판별한다(_infer_image_size). 체크포인트마다
+# 다르기 때문에(v5=256, p2_wet8=128) 고정값으로 두면 엉뚱한 모델을 올릴 때 조용히
+# 실패하는 대신 state_dict 로드 에러가 난다. AI_MODEL_IMAGE_SIZE 를 주면 그 값이 우선한다.
+IMAGE_SIZE_OVERRIDE = os.environ.get("AI_MODEL_IMAGE_SIZE")
+IMAGE_SIZE = int(IMAGE_SIZE_OVERRIDE) if IMAGE_SIZE_OVERRIDE else 256
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 _model = None
@@ -79,16 +83,34 @@ _loaded_use_film = False
 _loaded_cond_dim = 0          # 0 = 조건 없음, 1 = rain만, 2 = rain+time
 _model_lock = threading.Lock()
 
-_contour_transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.5] * 3, [0.5] * 3),
-])
-_rain_transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5]),
-])
+def _build_transforms(size):
+    return (
+        transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5] * 3, [0.5] * 3),
+        ]),
+        transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ]),
+    )
+
+
+_loaded_image_size = IMAGE_SIZE
+_contour_transform, _rain_transform = _build_transforms(IMAGE_SIZE)
+
+
+def _infer_image_size(state_g):
+    """체크포인트 구조에서 학습 해상도를 되짚는다.
+
+    UnetGenerator 는 num_downs = log2(image_size) 만큼 블록을 중첩하고, 각 중첩이
+    state_dict 키에 'submodule' 한 번으로 나타난다. 가장 깊은 키의 중첩 수 + 1 이
+    log2(image_size) 다 (체크포인트 4개 - v5/film 256, p2_wet8/film_light 128 - 로 검증).
+    """
+    depth = max((k.count("submodule") for k in state_g), default=0)
+    return 2 ** (depth + 1) if depth else None
 
 # 예측 RGB -> [0,1] 정규화값 복원용 Blues 컬러맵 역 LUT
 _LUT_N = 256
@@ -116,7 +138,13 @@ def _load_model(checkpoint_path=None):
         use_film = bool(film_keys)
         cond_dim = g[film_keys[0]].shape[1] if film_keys else 0
 
-        net = UnetGenerator(in_channels=in_channels, out_channels=3, image_size=IMAGE_SIZE,
+        global _loaded_image_size, _contour_transform, _rain_transform
+        size = int(IMAGE_SIZE_OVERRIDE) if IMAGE_SIZE_OVERRIDE else (_infer_image_size(g) or IMAGE_SIZE)
+        if size != _loaded_image_size:
+            _contour_transform, _rain_transform = _build_transforms(size)
+        _loaded_image_size = size
+
+        net = UnetGenerator(in_channels=in_channels, out_channels=3, image_size=size,
                              ngf=ngf, use_film=use_film, cond_dim=max(cond_dim, 1)).to(DEVICE)
         net.load_state_dict(g)
         net.eval()
@@ -131,6 +159,12 @@ def _load_model(checkpoint_path=None):
 def current_checkpoint():
     """지금 서빙 중인 체크포인트 경로 (헬스체크/버전 응답용)."""
     return _loaded_checkpoint_path or CHECKPOINT_PATH
+
+
+def current_image_size():
+    """이 체크포인트가 학습된 입력 해상도 (자동 판별)."""
+    _load_model()
+    return _loaded_image_size
 
 
 def current_in_channels():

@@ -17,7 +17,7 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.datasets.contour_flow_dataset import ContourFlowDataset, split_train_val
+from src.datasets.contour_flow_dataset import ContourFlowDataset, split_train_val, _group_key
 from src.models.translation_model import TranslationModel
 from src.utils.image_utils import save_triplet_png
 
@@ -47,6 +47,21 @@ def main(cfg):
     train_names, val_names = split_train_val(
         cfg["contours_dir"], cfg["flow_dir"], val_split=cfg["val_split"], seed=cfg["seed"]
     )
+
+    # max_train_groups: 학습에 쓸 "고유 지형" 수를 제한한다 (데이터 스케일링 곡선용,
+    # IMPROVEMENT_GUIDE.md Phase 1). val 은 건드리지 않으므로 지형 수만 다른 여러 학습을
+    # 같은 val 셋으로 비교할 수 있다. 어느 지형이 뽑히는지는 seed 로 고정한다.
+    max_groups = cfg.get("max_train_groups")
+    if max_groups:
+        import numpy as _np
+        groups = {}
+        for n in train_names:
+            groups.setdefault(_group_key(n), []).append(n)
+        keys = sorted(groups)
+        rng = _np.random.default_rng(cfg["seed"])
+        keep = {keys[i] for i in rng.permutation(len(keys))[:int(max_groups)]}
+        train_names = [n for n in train_names if _group_key(n) in keep]
+        print(f"학습 지형 제한: {len(keys)}종 -> {len(keep)}종 ({len(train_names)}장)")
     train_set = ContourFlowDataset(cfg["contours_dir"], cfg["flow_dir"],
                                     image_size=cfg["image_size"], augment=True, names=train_names,
                                     rain_dir=rain_dir, rain_values_json=rain_values_json,
@@ -72,6 +87,7 @@ def main(cfg):
         mode=cfg["mode"], in_channels=in_channels, out_channels=3, image_size=cfg["image_size"],
         lr=cfg["lr"], beta1=cfg["beta1"], lambda_l1=cfg["lambda_l1"], gan_loss=cfg["gan_loss"],
         device=device, use_film=use_film, cond_dim=cond_dim, ngf=cfg.get("ngf", 64),
+        wet_weight=cfg.get("wet_weight", 1.0),
     )
 
     os.makedirs(cfg["checkpoint_dir"], exist_ok=True)
