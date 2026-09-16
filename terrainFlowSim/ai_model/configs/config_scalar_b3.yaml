@@ -1,0 +1,25 @@
+# B3: 레버 3 — B1(ref 1mm + wet 8) 에 Sobel gradient L1 손실 추가 (GAN 은 뺌).
+# B2 에서 GAN 이 재구성 정확도를 떨어뜨리고 체커보드 아티팩트만 남겨서,
+# gradient 항 단독 효과를 보기 위해 B1 위에 grad_weight 만 얹는다.
+
+data_root: "data_scalar"
+image_size: 128
+ngf: 32
+seed: 42
+
+batch_size: 16
+num_workers: 2
+epochs: 250
+lr: 0.0002
+beta1: 0.5
+
+wet_weight: 8.0
+grad_weight: 3.0
+gan_weight: 0.0
+
+save_epoch_freq: 25
+sample_epoch_freq: 5
+patience: 40
+
+checkpoint_dir: "checkpoints_scalar_b3"
+output_dir: "outputs_scalar_b3"

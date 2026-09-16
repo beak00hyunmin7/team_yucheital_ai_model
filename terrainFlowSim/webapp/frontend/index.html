@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>예측 배수맵</title>
+<style>
+  :root {
+    --bg: #0f1720; --panel: #182430; --panel-2: #1f2e3d; --line: #2c3e50;
+    --text: #e8eef4; --muted: #9fb0c0; --accent: #2f9be6; --accent-2: #1d6fb8;
+    --danger: #e5534b; --ok: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif; line-height: 1.5;
+  }
+  header {
+    padding: 20px 24px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 20px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  #health { margin-left: auto; font-size: 12px; color: var(--muted); }
+  #health b { color: var(--ok); }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 24px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px;
+  }
+  .card h2 { margin: 0 0 14px; font-size: 15px; letter-spacing: .02em; }
+  .field { margin-bottom: 18px; }
+  .field:last-child { margin-bottom: 0; }
+  label.lbl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button {
+    background: var(--panel-2); color: var(--text); border: 0; padding: 9px 16px;
+    font-size: 13px; cursor: pointer;
+  }
+  .seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
+
+  input[type=file] {
+    width: 100%; padding: 10px; background: var(--panel-2);
+    border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 13px;
+  }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 7px; }
+
+  .rain-row { display: flex; align-items: center; gap: 14px; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  input[type=number] {
+    width: 90px; padding: 8px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--text); font-size: 13px;
+  }
+  .rain-val { font-variant-numeric: tabular-nums; min-width: 78px; text-align: right; }
+
+  button.run {
+    background: var(--accent); color: #fff; border: 0; border-radius: 9px;
+    padding: 12px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button.run:disabled { opacity: .5; cursor: not-allowed; }
+
+  .samples { display: flex; gap: 8px; flex-wrap: wrap; }
+  .samples img {
+    width: 62px; height: 62px; object-fit: cover; border-radius: 7px;
+    border: 2px solid transparent; cursor: pointer;
+  }
+  .samples img.sel { border-color: var(--accent); }
+
+  .results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .results figure { margin: 0; background: var(--panel-2); border-radius: 10px; padding: 12px; }
+  .results figcaption { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .results img { width: 100%; border-radius: 6px; display: block; background: #fff; }
+  .results a { font-size: 12px; color: var(--accent); text-decoration: none; display: inline-block; margin-top: 8px; }
+  @media (max-width: 720px) { .results { grid-template-columns: 1fr; } }
+  .vcase { background: var(--panel); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .vcase h3 { font-size: 14px; margin: 0 0 4px; }
+  .vgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 10px; }
+  .vgrid figure { margin: 0; }
+  .vgrid figcaption { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .vgrid img { width: 100%; border-radius: 6px; display: block; background: #fff; }
+  @media (max-width: 720px) { .vgrid { grid-template-columns: 1fr; } }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-left: 6px; }
+  .badge.val { background: #14532d; color: #bbf7d0; }
+  .badge.train { background: #7c2d12; color: #fed7aa; }
+  .vmetrics { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .vmetrics b { color: var(--fg); font-variant-numeric: tabular-nums; }
+  table.vsum { border-collapse: collapse; font-size: 13px; width: 100%; max-width: 560px; }
+  table.vsum td, table.vsum th { padding: 6px 10px; border-bottom: 1px solid #1f2937; text-align: left; }
+  table.vsum td:last-child, table.vsum th:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+  #err { color: var(--danger); font-size: 13px; white-space: pre-wrap; display: none; }
+  #meta { font-size: 12px; color: var(--muted); margin-top: 14px; white-space: pre-wrap; }
+  .spinner {
+    display: none; width: 16px; height: 16px; border: 2px solid var(--muted);
+    border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: middle; margin-left: 10px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .notes { font-size: 12px; color: var(--muted); margin-top: 10px; padding-left: 18px; }
+
+  /* 로그인 화면 */
+  #authView { max-width: 380px; margin: 60px auto; padding: 0 24px; }
+  #authView h2 { font-size: 17px; margin: 0 0 4px; }
+  #authView p.tag { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  #authView .card { padding: 24px; }
+  #authView input[type=email], #authView input[type=password] {
+    width: 100%; padding: 11px 12px; margin-top: 6px; background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px; color: var(--text); font-size: 14px;
+  }
+  #authView .field { margin-bottom: 16px; }
+  #authView button.run { width: 100%; margin-top: 4px; }
+  .auth-toggle { text-align: center; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .auth-toggle a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  #authErr { color: var(--danger); font-size: 13px; margin-top: 12px; display: none; }
+  header .who { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; gap: 12px; align-items: center; }
+  header .who button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>예측 배수맵</h1>
+  <span class="sub">등고선 → AI 예측 배수(지표 유출 집중) 맵</span>
+  <span id="health">모델 상태 확인 중…</span>
+  <span class="who" id="who" style="display:none">
+    <span id="whoEmail"></span>
+    <button id="logout">로그아웃</button>
+  </span>
+</header>
+
+<div id="authView" style="display:none">
+  <h2 id="authTitle">로그인</h2>
+  <p class="tag">예측 기능을 쓰려면 로그인이 필요합니다.</p>
+  <div class="card">
+    <div class="field">
+      <label class="lbl">이메일</label>
+      <input type="email" id="authEmail" autocomplete="username" />
+    </div>
+    <div class="field">
+      <label class="lbl">비밀번호 <span id="pwHint" style="display:none">(6자 이상)</span></label>
+      <input type="password" id="authPw" autocomplete="current-password" />
+    </div>
+    <button class="run" id="authSubmit">로그인</button>
+    <div id="authErr"></div>
+    <div class="auth-toggle" id="authToggle">
+      계정이 없으신가요? <a id="authSwitch">회원가입</a>
+    </div>
+  </div>
+</div>
+
+<main id="appView" style="display:none">
+  <div class="seg" id="tabSeg" style="margin-bottom:18px">
+    <button data-tab="predict" class="on">예측</button>
+    <button data-tab="verify">검증 (정답과 비교)</button>
+  </div>
+
+<div id="tabPredict">
+  <section class="card">
+    <h2>1. 입력 방식</h2>
+
+    <div class="field">
+      <label class="lbl">데이터 종류 (실무에서 다루는 자료에 맞춰 선택)</label>
+      <div class="seg" id="modeSeg">
+        <button data-mode="image" class="active">등고선 이미지</button>
+        <button data-mode="terrain">등고선 데이터 (고도 격자)</button>
+      </div>
+      <div class="hint" id="modeHint"></div>
+    </div>
+
+    <div class="field">
+      <label class="lbl" id="fileLbl">등고선 이미지 파일</label>
+      <input type="file" id="file" />
+      <div class="hint" id="fileHint"></div>
+    </div>
+
+    <div class="field" id="dxField" style="display:none">
+      <label class="lbl">격자 셀 크기 dx [m] — 등고선 데이터에 해상도 정보가 없을 때만 사용</label>
+      <input type="number" id="dx" value="10.4166667" step="0.1" min="0.01" />
+      <div class="hint">.asc/.grd 파일은 헤더의 cellsize 를 자동으로 씁니다. 이미지 모양엔 거의 영향이 없어요.</div>
+    </div>
+
+    <div class="field" id="sampleField">
+      <label class="lbl">또는 샘플 등고선으로 바로 테스트</label>
+      <div class="samples" id="samples"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. 강우 · 시점 조건</h2>
+    <div class="field">
+      <label class="lbl" id="rainLbl">강우량 (mm)</label>
+      <div class="rain-row">
+        <input type="range" id="rainRange" min="20" max="80" step="1" value="50" />
+        <input type="number" id="rainNum" min="0" max="200" step="1" value="50" />
+        <span class="rain-val" id="rainOut">50 mm</span>
+      </div>
+      <div class="hint" id="rainHint">학습 범위는 20~80mm 입니다. 범위를 벗어난 값은 경계값처럼 처리됩니다.</div>
+    </div>
+
+    <div class="field" id="timeField">
+      <label class="lbl" id="timeLbl">강우 시작 후 경과 시간 (초)</label>
+      <div class="rain-row">
+        <input type="range" id="timeRange" min="0" max="120" step="1" value="18" />
+        <input type="number" id="timeNum" min="0" max="120" step="1" value="18" />
+        <span class="rain-val" id="timeOut">18 s</span>
+      </div>
+      <div class="hint" id="timeHint">
+        비가 초반에 내리고 이후 빠지는 시뮬레이션이라 <b>시간이 짧을수록 물이 많습니다</b>.
+        가장 심한 상태는 20초 부근이고, 120초는 대부분 빠진 뒤입니다. 학습 범위 0~120초.
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <button class="run" id="run">예측 실행</button>
+    <span class="spinner" id="spin"></span>
+    <div id="err"></div>
+  </section>
+
+  <section class="card" id="resultCard" style="display:none">
+    <h2>3. 결과</h2>
+
+    <div id="animBox" style="display:none;margin:0 0 20px;padding:12px;background:var(--panel-2);border-radius:10px">
+      <button class="run" id="animRun" style="width:auto;padding:8px 16px;font-size:13px">시점 애니메이션 만들기 (0→120초)</button>
+      <button class="run" id="animPlay" style="width:auto;padding:8px 16px;font-size:13px;display:none">▶ 재생</button>
+      <input type="range" id="animScrub" min="0" max="6" step="1" value="0" style="display:none;vertical-align:middle;width:220px;margin-left:12px" />
+      <span id="animLabel" style="font-size:12px;color:var(--muted);margin-left:10px"></span>
+    </div>
+
+    <figure id="analysisFig" style="margin:0 0 22px; display:none">
+      <figcaption style="font-size:12px;color:var(--muted);margin-bottom:8px">
+        예측 배수맵 — 실제 등고선(m) · 음영기복 · 배수구 설치 후보(★)
+      </figcaption>
+      <img id="imgAnalysis" alt="" style="width:100%;max-width:760px;border-radius:8px;background:#fff;display:block" />
+      <a id="dlAnalysis" download="analysis.png" style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-block;margin-top:8px">PNG 저장</a>
+    </figure>
+
+    <p id="rawHeading" style="font-size:12px;color:var(--muted);margin:0 0 10px;display:none">
+      아래는 같은 예측의 모델 원본 출력입니다 (256px, 후처리 전).
+    </p>
+    <div class="results">
+      <figure>
+        <figcaption>입력 등고선 (모델에 들어간 이미지)</figcaption>
+        <img id="imgContour" alt="" />
+        <a id="dlContour" download="contour.png">PNG 저장</a>
+      </figure>
+      <figure>
+        <figcaption id="predCap">예측 배수맵</figcaption>
+        <img id="imgPred" alt="" />
+        <a id="dlPred" download="prediction.png">PNG 저장</a>
+      </figure>
+      <figure id="overlayFig">
+        <figcaption>오버레이 (등고선 + 예측)</figcaption>
+        <img id="imgOverlay" alt="" />
+        <a id="dlOverlay" download="overlay.png">PNG 저장</a>
+      </figure>
+    </div>
+    <ul class="notes" id="notes"></ul>
+    <div id="meta"></div>
+  </section>
+</div>
+
+<div id="tabVerify" style="display:none">
+  <section class="card">
+    <h2>검증 — OpenFOAM 정답과 직접 비교</h2>
+    <p class="tag" style="margin-top:0">
+      예측이 실제로 맞는지 확인하는 탭입니다. 각 케이스는 그 샘플의 <b>실제 시뮬레이션 조건</b>
+      (강우량·경과시간)으로 예측해서 OpenFOAM 정답과 나란히 놓고, 수치까지 같이 계산합니다.
+    </p>
+
+    <div class="field">
+      <label class="lbl">검증 대상</label>
+      <div class="seg" id="splitSeg">
+        <button data-split="val" class="on">학습에 안 쓴 지형 (val)</button>
+        <button data-split="train">학습에 쓴 지형 (train)</button>
+      </div>
+      <div class="hint" id="splitHint"></div>
+    </div>
+
+    <div class="field">
+      <label class="lbl">케이스 수</label>
+      <div class="rain-row">
+        <input type="range" id="vCount" min="1" max="24" step="1" value="6" />
+        <span class="rain-val" id="vCountOut">6 개</span>
+      </div>
+    </div>
+
+    <button class="run" id="vRun">검증 실행</button>
+    <span class="spinner" id="vSpin"></span>
+    <div id="vErr"></div>
+  </section>
+
+  <section class="card" id="vSummaryCard" style="display:none">
+    <h2>요약</h2>
+    <div id="vSummary"></div>
+    <p class="hint" style="margin-top:12px">
+      최대수심 비율 1.0 = 정답만큼 깊게 예측 (파이프라인 한계상 0.93 이 상한).
+      IoU 는 "물이 있다/없다"를 맞춘 정도로 1.0 이 완벽합니다.
+    </p>
+  </section>
+
+  <div id="vCases"></div>
+</div>
+</main>
+
+<script>
+const API = location.origin;
+let mode = "image";
+let selectedSample = null;   // 샘플 이미지 blob (있으면 파일 대신 전송)
+let timeConditioned = false; // 체크포인트가 시점(time_s) 조건을 받는가 (/api/health)
+let modelImageSize = null;   // 체크포인트 학습 해상도 (캡션 표시용)
+
+const $ = (id) => document.getElementById(id);
+
+// ---- 인증 상태 ----
+let authRequired = false;
+let authMode = "login";               // "login" | "signup"
+const tok = {
+  get: () => localStorage.getItem("yuche_token") || "",
+  set: (t) => localStorage.setItem("yuche_token", t),
+  clear: () => localStorage.removeItem("yuche_token"),
+};
+
+function showApp(email) {
+  $("authView").style.display = "none";
+  $("appView").style.display = "";
+  if (email) { $("who").style.display = "flex"; $("whoEmail").textContent = email; }
+}
+function showAuth() {
+  $("authView").style.display = "";
+  $("appView").style.display = "none";
+  $("who").style.display = "none";
+}
+
+async function initAuth(health) {
+  // auth_enabled 는 서버 기동 시점의 판정이다. 이 환경의 MariaDB 는 WSL2 안에 있어서
+  // Windows -> 127.0.0.1:3306 포워딩이 수시로 끊긴다. 기동 때 살아 있었으면 인증이 켜진 채
+  // 고정되는데, 그 뒤 DB 가 끊기면 로그인·회원가입이 둘 다 DB 를 타므로 토큰을 받을
+  // 방법이 없어 로그인 화면에 갇힌다. 서버도 같은 상황에서 인증을 생략하도록 고쳤으니
+  // (app.py: _auth_gate) 프런트도 지금 DB 가 죽어 있으면 그냥 앱을 연다.
+  const dbDown = health.auth_enabled && health.db !== "ok";
+  authRequired = !!health.auth_enabled && !dbDown;
+  if (dbDown) {
+    showApp();
+    $("health").innerHTML += ' · <span style="color:#fbbf24">DB 끊김 — 로그인 생략</span>';
+    return;
+  }
+  if (!authRequired) { showApp(); return; }        // MySQL 미연결 → 로그인 없이 사용
+  if (tok.get()) {
+    try {
+      const r = await fetch(API + "/api/auth/me", { headers: { Authorization: "Bearer " + tok.get() } });
+      if (r.ok) { showApp((await r.json()).email); return; }
+    } catch {}
+    tok.clear();
+  }
+  showAuth();
+}
+
+function renderAuthMode() {
+  const signup = authMode === "signup";
+  $("authTitle").textContent = signup ? "회원가입" : "로그인";
+  $("authSubmit").textContent = signup ? "회원가입" : "로그인";
+  $("pwHint").style.display = signup ? "" : "none";
+  $("authToggle").innerHTML = signup
+    ? '이미 계정이 있으신가요? <a id="authSwitch">로그인</a>'
+    : '계정이 없으신가요? <a id="authSwitch">회원가입</a>';
+  $("authSwitch").onclick = () => { authMode = signup ? "login" : "signup"; renderAuthMode(); };
+  $("authErr").style.display = "none";
+}
+
+$("authSubmit").addEventListener("click", async () => {
+  const email = $("authEmail").value.trim();
+  const password = $("authPw").value;
+  const e = $("authErr");
+  e.style.display = "none";
+  if (!email || !password) { e.textContent = "이메일과 비밀번호를 입력하세요."; e.style.display = "block"; return; }
+  try {
+    const r = await fetch(API + "/api/auth/" + authMode, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || ("HTTP " + r.status));
+    tok.set(d.token);
+    showApp(d.email);
+  } catch (err) {
+    e.textContent = err.message; e.style.display = "block";
+  }
+});
+$("authPw").addEventListener("keydown", (ev) => { if (ev.key === "Enter") $("authSubmit").click(); });
+
+$("logout").addEventListener("click", () => { tok.clear(); location.reload(); });
+
+const MODE_TEXT = {
+  image: {
+    hint: "matplotlib terrain 스타일(20단계 채색 + 검은 등고선)로 렌더링된 등고선 이미지. 학습 데이터와 스타일이 비슷할수록 정확합니다.",
+    fileLbl: "등고선 이미지 파일",
+    fileHint: "PNG / JPG / WEBP",
+    accept: "image/*",
+  },
+  terrain: {
+    hint: "고도값 격자 자체를 올리면 서버가 학습 때와 동일한 방식으로 등고선 이미지를 만들어 예측합니다. 스타일 불일치 걱정이 없어 가장 정확합니다.",
+    fileLbl: "등고선 데이터 파일",
+    fileHint: ".npy · .csv · .txt · .dat · .asc · .grd · .tif/.tiff · (회색조 높이맵 .png/.jpg)",
+    accept: ".npy,.csv,.txt,.dat,.asc,.grd,.tif,.tiff,.png,.jpg,.jpeg,.webp",
+  },
+};
+
+function applyMode() {
+  const t = MODE_TEXT[mode];
+  $("modeHint").textContent = t.hint;
+  $("fileLbl").textContent = t.fileLbl;
+  $("fileHint").textContent = t.fileHint;
+  $("file").setAttribute("accept", t.accept);
+  $("dxField").style.display = mode === "terrain" ? "" : "none";
+  $("sampleField").style.display = mode === "image" ? "" : "none";
+}
+
+$("modeSeg").addEventListener("click", (e) => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  mode = btn.dataset.mode;
+  [...$("modeSeg").children].forEach((b) => b.classList.toggle("active", b === btn));
+  selectedSample = null;
+  [...$("samples").children].forEach((i) => i.classList.remove("sel"));
+  applyMode();
+});
+
+$("file").addEventListener("change", () => {
+  selectedSample = null;
+  [...$("samples").children].forEach((i) => i.classList.remove("sel"));
+});
+
+// 강우 슬라이더 <-> 숫자 동기화
+function syncRain(v) {
+  v = Math.max(0, Math.min(200, Math.round(v)));
+  $("rainRange").value = Math.max(20, Math.min(80, v));
+  $("rainNum").value = v;
+  $("rainOut").textContent = v + " mm";
+}
+$("rainRange").addEventListener("input", (e) => syncRain(+e.target.value));
+$("rainNum").addEventListener("input", (e) => syncRain(+e.target.value));
+
+// 경과 시간 슬라이더 <-> 숫자 동기화
+function syncTime(v) {
+  v = Math.max(0, Math.min(120, Math.round(v)));
+  $("timeRange").value = v;
+  $("timeNum").value = v;
+  $("timeOut").textContent = v + " s";
+}
+$("timeRange").addEventListener("input", (e) => syncTime(+e.target.value));
+$("timeNum").addEventListener("input", (e) => syncTime(+e.target.value));
+
+// 헬스체크 + 인증 초기화
+renderAuthMode();
+fetch(API + "/api/health").then((r) => r.json()).then((h) => {
+  const rain = h.rain_conditioned
+    ? `강우 조건 반영 (${h.rain_range_mm[0]}~${h.rain_range_mm[1]}mm)`
+    : "강우 조건 미반영 모델";
+  const db = h.auth_enabled ? "" : " · DB미연결(로그인 생략)";
+  const tcond = h.time_conditioned ? " · 시점 조건 반영" : "";
+  $("health").innerHTML = `<b>●</b> ${h.checkpoint} · ${h.device.toUpperCase()} · ${rain}${tcond}${db}`;
+  if (!h.rain_conditioned) {
+    $("rainHint").textContent = "현재 로드된 체크포인트는 강우 조건을 쓰지 않습니다. 강우량 값은 무시됩니다.";
+    $("rainRange").disabled = $("rainNum").disabled = true;
+  }
+  timeConditioned = !!h.time_conditioned;
+  modelImageSize = h.image_size || null;
+  if (!timeConditioned) {
+    // 구버전 체크포인트(cond_dim<2)는 시점을 모른다 -> 슬라이더를 숨겨서 헛된 조작을 막는다
+    $("timeField").style.display = "none";
+  } else if (h.default_time_s != null) {
+    syncTime(h.default_time_s);
+  }
+  initAuth(h);
+}).catch(() => { $("health").textContent = "모델 상태를 불러오지 못했습니다"; showApp(); });
+
+// 샘플 목록
+fetch(API + "/api/samples").then((r) => r.json()).then(({ samples }) => {
+  const box = $("samples");
+  samples.forEach((name) => {
+    const img = document.createElement("img");
+    img.src = API + "/api/sample/" + encodeURIComponent(name);
+    img.title = name;
+    img.addEventListener("click", async () => {
+      const blob = await (await fetch(img.src)).blob();
+      selectedSample = new File([blob], name, { type: "image/png" });
+      [...box.children].forEach((i) => i.classList.toggle("sel", i === img));
+      $("file").value = "";
+    });
+    box.appendChild(img);
+  });
+});
+
+function currentUpload() {
+  return selectedSample || $("file").files[0];
+}
+
+/** 예측 1회. timeS 를 주면 슬라이더 대신 그 값을 쓴다 (애니메이션용). */
+async function callPredict(upload, timeS) {
+  const fd = new FormData();
+  fd.append("mode", mode);
+  fd.append("rain_mm", $("rainNum").value);
+  fd.append("time_s", timeS != null ? timeS : $("timeNum").value);
+  fd.append("dx", $("dx").value);
+  fd.append("file", upload);
+
+  const headers = tok.get() ? { Authorization: "Bearer " + tok.get() } : {};
+  const res = await fetch(API + "/api/predict", { method: "POST", body: fd, headers });
+  if (res.status === 401) {
+    tok.clear(); showAuth();
+    throw new Error("세션이 만료되었습니다. 다시 로그인해 주세요.");
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`HTTP ${res.status} ${res.statusText} (서버가 JSON이 아닌 응답을 보냈습니다)`);
+  }
+  if (!res.ok) {
+    // detail 이 문자열이 아닐 수도 있다(FastAPI 검증 오류는 배열) -> 그대로 보여준다
+    const d = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    throw new Error(`[HTTP ${res.status}] ${d || res.statusText}`);
+  }
+  return data;
+}
+
+$("run").addEventListener("click", async () => {
+  const err = $("err");
+  err.style.display = "none";
+
+  const upload = currentUpload();
+  if (!upload) { err.textContent = "파일을 선택하거나 샘플을 골라주세요."; err.style.display = "block"; return; }
+
+  $("run").disabled = true;
+  $("spin").style.display = "inline-block";
+  try {
+    const data = await callPredict(upload);
+    stopAnim();
+    animFrames = null;
+    $("animScrub").style.display = $("animPlay").style.display = "none";
+    $("animLabel").textContent = "";
+    $("animBox").style.display = timeConditioned ? "" : "none";
+
+    const set = (imgId, dlId, b64) => {
+      const url = "data:image/png;base64," + b64;
+      $(imgId).src = url; $(dlId).href = url;
+    };
+    set("imgContour", "dlContour", data.contour_png_base64);
+    set("imgPred", "dlPred", data.prediction_png_base64);
+    set("imgOverlay", "dlOverlay", data.overlay_png_base64);
+
+    const hasMap = !!data.analysis_png_base64;   // 등고선 데이터 모드
+    if (hasMap) set("imgAnalysis", "dlAnalysis", data.analysis_png_base64);
+    $("analysisFig").style.display = hasMap ? "" : "none";
+    // 지도가 있으면 아래 3장은 '원본 출력' 참고용, 오버레이는 숨김(고도 컬러맵이 물처럼 보여 혼동)
+    $("rawHeading").style.display = hasMap ? "" : "none";
+    $("overlayFig").style.display = hasMap ? "none" : "";
+    $("predCap").textContent = hasMap
+      ? `모델 원본 출력${modelImageSize ? " (" + modelImageSize + "px)" : ""}`
+      : "예측 배수맵";
+
+    const extra = [...(data.notes || [])];
+    if (data.drain_candidate) {
+      const p = data.drain_candidate.pixel;
+      extra.push(`배수구 설치 후보(예측 유출 최대점): 픽셀 (${p.x}, ${p.y})`);
+    }
+    $("notes").innerHTML = extra.map((n) => `<li>${n}</li>`).join("");
+    $("meta").textContent =
+      `checkpoint: ${data.checkpoint}\n` + JSON.stringify(data.meta, null, 2);
+    $("resultCard").style.display = "";
+    $("resultCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    err.textContent = "예측 실패: " + e.message;
+    err.style.display = "block";
+  } finally {
+    $("run").disabled = false;
+    $("spin").style.display = "none";
+  }
+});
+
+// --- 시점 애니메이션 ------------------------------------------------------
+// 같은 지형·같은 강우량에서 time_s 만 훑어 물이 차올랐다 빠지는 과정을 보여준다.
+// 프레임마다 서버를 한 번씩 부르므로(7회) 미리 전부 받아둔 뒤 재생한다.
+const ANIM_TIMES = [0, 20, 40, 60, 80, 100, 120];
+let animFrames = null;     // [{t, analysis, prediction, overlay}]
+let animTimer = null;
+
+function stopAnim() {
+  if (animTimer) { clearInterval(animTimer); animTimer = null; }
+  $("animPlay").textContent = "▶ 재생";
+}
+
+function showFrame(i) {
+  if (!animFrames || !animFrames[i]) return;
+  const f = animFrames[i];
+  const useMap = !!f.analysis;
+  if (useMap) {
+    $("imgAnalysis").src = "data:image/png;base64," + f.analysis;
+    $("dlAnalysis").href = $("imgAnalysis").src;
+  }
+  $("imgPred").src = "data:image/png;base64," + f.prediction;
+  $("dlPred").href = $("imgPred").src;
+  if (f.overlay) {
+    $("imgOverlay").src = "data:image/png;base64," + f.overlay;
+    $("dlOverlay").href = $("imgOverlay").src;
+  }
+  $("animScrub").value = i;
+  $("animLabel").textContent = `경과 ${f.t}초 (${i + 1}/${animFrames.length})`;
+}
+
+$("animRun").addEventListener("click", async () => {
+  const err = $("err");
+  const upload = currentUpload();
+  if (!upload) { err.textContent = "파일을 선택하거나 샘플을 골라주세요."; err.style.display = "block"; return; }
+
+  stopAnim();
+  $("animRun").disabled = true;
+  $("spin").style.display = "inline-block";
+  try {
+    const frames = [];
+    for (let i = 0; i < ANIM_TIMES.length; i++) {
+      $("animLabel").textContent = `생성 중… ${i + 1}/${ANIM_TIMES.length} (경과 ${ANIM_TIMES[i]}초)`;
+      const d = await callPredict(upload, ANIM_TIMES[i]);
+      frames.push({
+        t: ANIM_TIMES[i],
+        analysis: d.analysis_png_base64,
+        prediction: d.prediction_png_base64,
+        overlay: d.overlay_png_base64,
+      });
+    }
+    animFrames = frames;
+    $("animScrub").max = frames.length - 1;
+    $("animScrub").style.display = $("animPlay").style.display = "";
+    showFrame(0);
+  } catch (e) {
+    err.textContent = "애니메이션 생성 실패: " + e.message;
+    err.style.display = "block";
+    $("animLabel").textContent = "";
+  } finally {
+    $("animRun").disabled = false;
+    $("spin").style.display = "none";
+  }
+});
+
+$("animPlay").addEventListener("click", () => {
+  if (!animFrames) return;
+  if (animTimer) { stopAnim(); return; }
+  let i = +$("animScrub").value;
+  $("animPlay").textContent = "⏸ 일시정지";
+  animTimer = setInterval(() => {
+    i = (i + 1) % animFrames.length;
+    showFrame(i);
+  }, 600);
+});
+
+$("animScrub").addEventListener("input", (e) => { stopAnim(); showFrame(+e.target.value); });
+
+// --- 검증 탭 ---------------------------------------------------------------
+// 예측이 "정말 맞는지"를 OpenFOAM 정답과 나란히 놓고 확인한다.
+//
+// split 을 나눈 이유: data/contours 에는 학습에 쓴 지형과 안 쓴 지형이 섞여 있고,
+// 기본 샘플 갤러리는 이를 구분하지 않는다(30개 중 25개가 학습 지형). 학습 지형에서의
+// 성능은 크게 부풀려지므로(MAE 0.0069 vs 0.0115), 두 쪽을 따로 볼 수 있어야 한다.
+let vSplit = "val";
+let lastList = null;   // 어떤 필터로 케이스를 골랐는지 요약에 밝히기 위해 보관
+
+const SPLIT_HINT = {
+  val: "학습에 쓰이지 않은 지형입니다. 실제 성능은 이 쪽 숫자입니다.",
+  train: "학습에 쓰인 지형입니다. 데이터 누출이라 실제보다 잘 나옵니다 — 비교용으로만 보세요.",
+};
+
+document.querySelectorAll("#tabSeg button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#tabSeg button").forEach((x) => x.classList.toggle("on", x === b));
+    const t = b.dataset.tab;
+    $("tabPredict").style.display = t === "predict" ? "" : "none";
+    $("tabVerify").style.display = t === "verify" ? "" : "none";
+  });
+});
+
+document.querySelectorAll("#splitSeg button").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#splitSeg button").forEach((x) => x.classList.toggle("on", x === b));
+    vSplit = b.dataset.split;
+    $("splitHint").textContent = SPLIT_HINT[vSplit];
+  });
+});
+$("splitHint").textContent = SPLIT_HINT.val;
+
+$("vCount").addEventListener("input", (e) => { $("vCountOut").textContent = e.target.value + " 개"; });
+
+const fmt = (v, d = 4) => (v === null || v === undefined ? "—" : (+v).toFixed(d));
+
+function caseCard(c) {
+  const m = c.metrics;
+  const b64 = (k) => "data:image/png;base64," + c[k];
+  const div = document.createElement("div");
+  div.className = "vcase";
+  div.innerHTML = `
+    <h3>${c.name}<span class="badge ${c.split}">${c.split === "val" ? "학습 안 씀" : "학습에 씀"}</span></h3>
+    <div class="hint">강우 ${fmt(c.rain_mm, 1)}mm · 경과 ${fmt(c.time_s, 0)}초 · 격자 ${c.grid.join("×")} · 정답 최대수심 ${fmt(m.gt_max_m, 3)}m${m.gt_max_m < 0.01 ? " — <b>정답이 거의 마른 케이스라 비교 의미가 약합니다</b>" : ""}</div>
+    <div class="vgrid">
+      <figure><figcaption>입력 등고선</figcaption><img src="${b64("contour_png_base64")}" alt=""></figure>
+      <figure><figcaption><b>정답</b> (OpenFOAM)</figcaption><img src="${b64("truth_png_base64")}" alt=""></figure>
+      <figure><figcaption>예측 (AI)</figcaption><img src="${b64("prediction_png_base64")}" alt=""></figure>
+    </div>
+    <div class="vmetrics">
+      <span>MAE <b>${fmt(m.mae_m)} m</b></span>
+      <span>상관계수 r <b>${fmt(m.r, 3)}</b></span>
+      <span>IoU@1cm <b>${fmt(m.iou_1cm, 3)}</b></span>
+      <span>IoU@5cm <b>${fmt(m.iou_5cm, 3)}</b></span>
+      <span>최대수심 비율 <b>${fmt(m.peak_ratio, 2)}</b></span>
+      <span>최심점 거리 <b>${fmt(m.peak_dist_px, 1)} px</b></span>
+    </div>`;
+  return div;
+}
+
+// 정답이 거의 마른 케이스(최대수심 1cm 미만)는 비율 지표가 0 나누기에 가까워져
+// 값이 폭발한다(평균 2.77 같은 값이 나온다). 비율은 중앙값으로 내고, 마른 케이스는
+// 비율 계산에서 뺀 뒤 몇 개를 뺐는지 밝힌다.
+const DRY_M = 0.01;
+
+function summarize(cases) {
+  const nums = (k, src) => (src || cases).map((c) => c.metrics[k])
+    .filter((x) => x !== null && x !== undefined && isFinite(x));
+  const avg = (k, src) => { const v = nums(k, src); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const med = (k, src) => {
+    const v = nums(k, src).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const h = v.length >> 1;
+    return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
+  };
+  const wet = cases.filter((c) => c.metrics.gt_max_m >= DRY_M);
+  const dry = cases.length - wet.length;
+
+  const rows = [
+    ["케이스 수", cases.length, 0],
+    ["MAE [m]", avg("mae_m"), 4],
+    ["상관계수 r", avg("r"), 3],
+    ["IoU@1cm", avg("iou_1cm"), 3],
+    ["IoU@5cm", avg("iou_5cm"), 3],
+    ["최대수심 비율 (중앙값)", med("peak_ratio", wet), 3],
+    ["편향 [m]", avg("bias_m"), 5],
+  ];
+  const label = vSplit === "val" ? "학습에 안 쓴 지형 (val) — 실제 성능"
+                                 : "학습에 쓴 지형 (train) — 누출, 참고용";
+  const dryNote = dry
+    ? `<p class="hint" style="margin:8px 0 0">정답이 거의 마른 케이스 ${dry}개는 최대수심 비율 계산에서 제외했습니다 (정답 최대수심 &lt; 1cm).</p>`
+    : "";
+  // 어떤 기준으로 케이스를 골랐는지 반드시 밝힌다 (조용히 고르면 체리피킹이다)
+  const pickNote = lastList && lastList.filtered_out
+    ? `<p class="hint" style="margin:8px 0 0">케이스 선정: 후보 ${lastList.scanned}개를 훑어 정답 최대수심 ${lastList.min_depth_m}m 이상인 것을 우선 선택했습니다 (기준 미달 ${lastList.filtered_out}개는 뒤로 밀림). 물이 거의 없는 지형은 배수 예측 검증에 정보가 없기 때문입니다.</p>`
+    : "";
+  $("vSummary").innerHTML =
+    `<p style="margin:0 0 10px;font-size:13px">${label}</p><table class="vsum">` +
+    rows.map(([k, v, d]) => `<tr><th>${k}</th><td>${fmt(v, d)}</td></tr>`).join("") +
+    `</table>` + dryNote + pickNote;
+  $("vSummaryCard").style.display = "";
+}
+
+$("vRun").addEventListener("click", async () => {
+  const err = $("vErr");
+  err.style.display = "none";
+  $("vRun").disabled = true;
+  $("vSpin").style.display = "inline-block";
+  $("vCases").innerHTML = "";
+  $("vSummaryCard").style.display = "none";
+  try {
+    const limit = +$("vCount").value;
+    const list = await (await fetch(`${API}/api/testset?split=${vSplit}&limit=${limit}`)).json();
+    if (!list.cases || !list.cases.length) throw new Error("해당 split 의 케이스를 찾지 못했습니다.");
+    lastList = list;
+
+    const done = [];
+    for (const item of list.cases) {
+      $("vSpin").title = `${done.length + 1}/${list.cases.length}`;
+      const res = await fetch(`${API}/api/testcase?name=${encodeURIComponent(item.name)}`);
+      const c = await res.json();
+      if (!res.ok) throw new Error(c.detail || ("HTTP " + res.status));
+      done.push(c);
+      $("vCases").appendChild(caseCard(c));
+      summarize(done);
+    }
+  } catch (e) {
+    err.textContent = "검증 실패: " + e.message;
+    err.style.display = "block";
+  } finally {
+    $("vRun").disabled = false;
+    $("vSpin").style.display = "none";
+  }
+});
+
+applyMode();
+syncRain(50);
+syncTime(18);
+</script>
+</body>
+</html>

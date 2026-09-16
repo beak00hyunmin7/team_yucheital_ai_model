@@ -1,0 +1,26 @@
+# B1: 레버 1 — 얇은 필름 억제, 채널 강조
+#   depth_ref 0.1mm -> 1mm  (build_scalar_dataset.py --stats-only --depth-ref-mm 1.0 로 반영)
+#   wet_weight 4 -> 8
+# GAN / gradient 손실은 아직 끔.
+
+data_root: "data_scalar"
+image_size: 128
+ngf: 32
+seed: 42
+
+batch_size: 16
+num_workers: 2
+epochs: 300
+lr: 0.0002
+beta1: 0.5
+
+wet_weight: 8.0
+grad_weight: 0.0
+gan_weight: 0.0
+
+save_epoch_freq: 25
+sample_epoch_freq: 5
+patience: 40
+
+checkpoint_dir: "checkpoints_scalar_b1"
+output_dir: "outputs_scalar_b1"

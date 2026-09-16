@@ -1,0 +1,33 @@
+# 강우 조건화 실험 v4: FiLM(rain+time, cond_dim=2) + GAN.
+# config_film_time.yaml(U-Net만, L1 손실)은 조건화(특히 시점)는 성공했지만
+# val 세트 예측에서 실제 정답만큼 또렷한 침수 경계를 재현하지 못함(뭉개짐) -
+# 예전에 GAN(PatchGAN+L1)이 순수 U-Net보다 경계가 선명했던 경험을 재적용.
+# gan_loss: lsgan, lr_decay_start는 이전 config_gan_v2.yaml에서 안정적으로
+# 확인된 설정을 그대로 가져옴.
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"
+time_values_json: "data/time_values.json"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "gan"
+gan_loss: "lsgan"
+lr_decay_start: 100
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_film_time_gan"
+output_dir: "outputs_film_time_gan"

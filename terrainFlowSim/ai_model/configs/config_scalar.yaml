@@ -1,0 +1,22 @@
+# B안: 스칼라 격자 회귀 (1ch 고도격자 -> 1ch 수심격자, FiLM 강우조건).
+# 데이터는 scripts/build_scalar_dataset.py 로 먼저 생성: data_scalar/
+
+data_root: "data_scalar"
+
+image_size: 128      # 원본 96 격자를 128 로 리샘플 (2의 거듭제곱 필요)
+ngf: 32
+seed: 42
+
+batch_size: 16
+num_workers: 2       # OpenFOAM 동시 실행 중이면 낮게
+epochs: 400
+lr: 0.0002
+beta1: 0.5
+wet_weight: 4.0      # 수심이 큰 픽셀 오차 가중치 (치우친 분포 보정)
+
+save_epoch_freq: 25
+sample_epoch_freq: 5
+patience: 50
+
+checkpoint_dir: "checkpoints_scalar"
+output_dir: "outputs_scalar"

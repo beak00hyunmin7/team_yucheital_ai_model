@@ -1,0 +1,27 @@
+# GAN 학습 안정화 실험 (config_gan.yaml 대비 변경점: gan_loss=lsgan, 후반부 lr 선형 감소)
+# 판별자가 생성자를 압도하던 문제(loss_D가 너무 낮게 붙던 현상) 완화 목적.
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "gan"
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "lsgan"       # vanilla(BCE) -> lsgan(MSE): 그래디언트가 더 부드러워 학습 안정성 향상 기대
+lr_decay_start: 100     # 100 epoch까지는 고정 lr, 이후 200까지 선형으로 0에 가깝게 감소
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_gan_v2"
+output_dir: "outputs_gan_v2"

@@ -1,0 +1,38 @@
+# v5: 타깃 정규화 버그 수정 후 재학습 (FiLM rain+time + GAN).
+#
+# v1~v4(채널결합/FiLM/FiLM+time/+GAN)가 전부 val L1 0.068에서 멈췄던 진짜 원인은
+# 아키텍처가 아니라 학습 타깃이었다. render_depth_rgb()가 샘플마다 자기 자신의
+# 최댓값으로 정규화하는 바람에 절대 수심 정보가 사라졌고, "강우가 많은 쪽이 더
+# 심각하게 렌더링되는" 비율이 57.5%(=랜덤)에 불과했다. 전역 vmax(0.6m)+sqrt로
+# 바꾼 뒤 같은 검사에서 99.3%가 되었고, 그 데이터로 다시 학습한다.
+#
+# 이전 실행 대비 바뀐 점: 데이터(타깃 정규화) + patience 30 -> 50.
+# (v3/v4가 epoch 45~50에서 조기종료됐는데, 타깃에 실제 신호가 생긴 만큼
+#  더 오래 개선될 여지가 있어 인내값을 늘림)
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"
+time_values_json: "data/time_values.json"
+
+image_size: 256
+val_split: 0.15
+seed: 42
+
+mode: "gan"
+gan_loss: "lsgan"
+lr_decay_start: 100
+batch_size: 4
+num_workers: 2
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 50
+
+checkpoint_dir: "checkpoints_v5"
+output_dir: "outputs_v5"

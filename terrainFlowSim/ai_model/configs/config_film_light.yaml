@@ -1,0 +1,31 @@
+# 경량화 실험 (A안): FiLM 강우조건 모델을 그대로 두되
+#  - image_size 256 -> 128  (원본 지형이 96x96 이라 정보 손실 거의 없음)
+#  - ngf 64 -> 32           (UNet 폭 절반)
+# 목표: netG 54.5M -> 약 3~7M, 추론 4배+ 가속, 작은 데이터셋 과적합 완화.
+# config_film.yaml 과 데이터/손실은 동일하게 두고 크기만 바꿔 A/B 비교가 되도록 함.
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"   # 있으면 자동으로 FiLM 사용
+
+image_size: 128
+ngf: 32
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+batch_size: 16          # 해상도가 1/4 이라 배치를 키워도 됨
+num_workers: 2          # OpenFOAM(CPU) 동시 실행 중이면 낮게 유지
+epochs: 200
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+gan_loss: "vanilla"
+
+save_epoch_freq: 10
+sample_epoch_freq: 5
+log_iter_freq: 20
+patience: 30
+
+checkpoint_dir: "checkpoints_film_light"
+output_dir: "outputs_film_light"
