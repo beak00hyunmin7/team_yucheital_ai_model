@@ -58,8 +58,30 @@ wsl -d Ubuntu-22.04 -u root -- bash -lc '
 '
 ```
 
-`users` 테이블(id, email, password_hash, created_at)은 서버 첫 기동 시 자동 생성.
+`users` 테이블(id, email, password_hash, created_at)은 DB 에 처음 연결되는 순간 자동 생성.
 WSL/PC 를 재시작하면 `service mariadb start` 를 다시 해야 함 (run_windows.bat 이 대신 해줌).
+
+### WSL2 가 저절로 꺼져서 DB 가 끊기는 문제 (2026-11-04 해결)
+
+증상은 "조금 전까지 되던 로그인이 몇 분 뒤 안 된다" 였다. 원인은 DB 가 아니라 **WSL2 VM
+자체가 유휴 상태에서 종료되는 것**이다. VM 이 내려가면 그 안의 MariaDB 도 같이 죽는다.
+
+실측: `wsl` 명령 직후에는 `127.0.0.1:3306` 연결이 5/5 성공하고, 1~2분 방치하면 20/20
+연결거부(WinError 10061)가 난다. 그 상태에서 WSL 에 들어가 보면 `uptime` 이 "up 0 minutes"
+— VM 이 방금 새로 뜬 것이다. MariaDB 는 systemd 에 enabled 되어 있어 VM 이 뜰 때 자동
+기동되므로 "WSL 을 건드리면 되살아나는" 것처럼 보여서 포워딩 문제로 오해하기 쉽다.
+
+대책 두 가지를 같이 넣었다.
+
+1. `run_windows.bat` 이 서버가 도는 동안 VM 을 붙잡아 둘 **닻 프로세스**를 띄운다
+   (`wsl ... sleep infinity`, 서버 종료 시 `pkill` 로 정리).
+2. `auth.db_ready()` 가 DB 준비 상태를 **그때그때 다시 판정**한다(5초 캐시). 기동 시점의
+   판정을 상수로 들고 있으면, 기동 때 DB 가 꺼져 있었다는 이유만으로 그 뒤 DB 가 살아나도
+   프로세스가 죽을 때까지 인증이 비활성으로 고정된다. 실제로 그 상태로 서버가 떠서
+   회원가입·로그인이 조용히 죽어 있었다.
+
+`/api/health` 의 `db_error` 로 끊긴 이유를 바로 확인할 수 있다 (예전에는 예외를 통째로
+버려서 "down" 말고는 알 수 있는 게 없었다).
 
 ## 결과 그림
 

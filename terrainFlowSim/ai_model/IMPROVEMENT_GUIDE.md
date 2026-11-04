@@ -482,3 +482,4 @@ DataLoader 워커가 쓰기 중이던 파일을 임포트했다. 무효 산출�
 | 2026-09-16 | Phase 4 | 검증 탭 추가(`ground_truth.py` + `/api/testset`, `/api/testcase`). 지형 중복 집계 버그 수정 |
 | 2026-09-16 | Phase 6 | 번짐 진단(sigma≈2.2). 기울기 손실 역효과, 입력 정보 가설 반증, 후처리 선명화 +0.048 |
 | 2026-09-16 | Phase 5 | `run_windows.bat` CRLF/CP949 복구, MariaDB 대기 추가, DB 끊김 시 인증 생략 (예측 실패 원인) |
+| 2026-11-04 | Phase 7 | WSL2 유휴 종료로 MariaDB 가 같이 죽는 것이 "로그인 끊김"의 진짜 원인임을 확인. 닻 프로세스 + `db_ready()` 지연판정으로 해결, 웹앱 전 기능 실기동 검증 |

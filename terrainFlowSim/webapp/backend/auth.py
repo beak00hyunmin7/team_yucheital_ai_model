@@ -51,22 +51,63 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-def init_db() -> bool:
-    """테이블 생성. DB 가 안 떠 있으면 False (앱은 계속 뜨고 인증만 비활성)."""
+# DB 준비 상태는 "기동 때 한 번" 판정하면 안 된다.
+#
+# 이 환경의 MariaDB 는 WSL2 안에 있고 Windows -> 127.0.0.1:3306 포워딩이 수시로 끊긴다
+# (연속 8/8 성공 직후 바로 연결거부(WinError 10061)를 관측). 끊김은 방향이 둘인데
+# 기존 코드는 한쪽만 막혀 있었다.
+#   (1) 기동 때 살아 있다가 뒤에 끊김  -> app._auth_gate 가 처리한다 (토큰 검증 실패 시 통과).
+#   (2) 기동 때 끊겨 있다가 뒤에 살아남 -> 처리되지 않았다. init_db() 의 False 가 그대로
+#       latch 되어 프로세스가 죽을 때까지 인증이 꺼진 채 고정된다. 실제로 이 상태로 서버가
+#       떴고, 회원가입·로그인이 조용히 비활성인 것을 /api/health 로만 알 수 있었다.
+#
+# 그래서 짧은 TTL 캐시로 매번 다시 판정한다. 처음 연결된 순간에 테이블을 만들므로
+# DB 가 늦게 떠도 가입이 바로 된다.
+_READY_TTL_S = 5.0            # 요청마다 TCP 연결을 열지 않도록 이 시간만 캐시
+_ready_cache: tuple[float, bool] = (0.0, False)
+_tables_created = False
+_last_error = ""
+
+
+def db_ready(force: bool = False) -> bool:
+    """DB 를 지금 쓸 수 있는지. 실패 이유는 db_error() 로 남긴다."""
+    global _ready_cache, _tables_created, _last_error
+    now = time.time()
+    if not force and now - _ready_cache[0] < _READY_TTL_S:
+        return _ready_cache[1]
+
+    ok = False
     try:
-        Base.metadata.create_all(bind=engine)
-        return True
-    except (OperationalError, SQLAlchemyError):
-        return False
+        if not _tables_created:
+            Base.metadata.create_all(bind=engine)   # 연결 + 최초 1회 테이블 생성
+            _tables_created = True
+        else:
+            with engine.connect() as c:
+                c.exec_driver_sql("SELECT 1")
+        ok = True
+        _last_error = ""
+    except (OperationalError, SQLAlchemyError) as e:
+        # 기존 코드는 예외를 통째로 버려서 "db: down" 의 이유를 알 방법이 없었다.
+        # pymysql 이 Windows 오류 메시지를 CP949 로 잘못 디코드해서 깨진 글자가 섞여
+        # 온다. JSON 으로 못 내보내는 서러게이트만 걷어낸다 (WinError 번호는 남는다).
+        msg = " ".join(str(getattr(e, "orig", e)).splitlines())
+        _last_error = "".join(c for c in msg if not 0xD800 <= ord(c) <= 0xDFFF)[:200]
+    _ready_cache = (now, ok)
+    return ok
+
+
+def init_db() -> bool:
+    """기동 시 1회 호출용. 반환값을 상수로 들고 있지 말고 db_ready() 를 그때그때 쓸 것."""
+    return db_ready(force=True)
 
 
 def db_status() -> str:
-    try:
-        with engine.connect() as c:
-            c.exec_driver_sql("SELECT 1")
-        return "ok"
-    except Exception:  # noqa: BLE001
-        return "down"
+    return "ok" if db_ready() else "down"
+
+
+def db_error() -> str:
+    """마지막 연결 실패 이유 (연결되어 있으면 빈 문자열)."""
+    return _last_error
 
 
 def _get_db():

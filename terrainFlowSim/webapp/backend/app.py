@@ -97,7 +97,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth.router)
-_DB_READY = auth.init_db()   # MySQL 없으면 False (앱은 뜨고 인증만 비활성)
+auth.init_db()   # 기동 시 테이블 생성 시도. 실패해도 latch 하지 않는다 (auth.db_ready 주석 참조)
 
 
 # --------------------------------------------------------------------------- #
@@ -121,8 +121,9 @@ def health() -> dict:
         "default_time_s": DEFAULT_TIME_S,
         "image_size": _safe_image_size(),
         "device": _device(),
-        "auth_enabled": _DB_READY,
-        "db": auth.db_status() if _DB_READY else "down",
+        "auth_enabled": auth.db_ready(),
+        "db": auth.db_status(),
+        "db_error": auth.db_error() or None,
     }
 
 
@@ -303,7 +304,7 @@ def testcase(name: str) -> dict:
 def _auth_gate(authorization: str = Header(default="")) -> str | None:
     """인증이 켜져 있으면(=MySQL 연결됨) 토큰 필수, 아니면 통과.
 
-    _DB_READY 는 기동 시점 한 번만 판정된다. 그런데 이 환경의 MariaDB 는 WSL2 안에 있고
+    이 환경의 MariaDB 는 WSL2 안에 있고
     Windows -> 127.0.0.1:3306 포워딩이 수시로 끊긴다(같은 분 안에 20/20 성공 -> 20/20 실패를
     관측). 기동 때 살아 있었으면 인증이 켜진 채 고정되는데, 그 뒤 DB 가 끊기면 **로그인
     자체가 불가능**해져서 토큰을 받을 방법이 없고 예측이 전부 401 로 떨어진다
@@ -312,8 +313,11 @@ def _auth_gate(authorization: str = Header(default="")) -> str | None:
     설계 의도는 "DB 가 없으면 인증을 생략한다" 이므로, 토큰 검증에 실패했을 때 DB 가
     실제로 끊긴 상태인지 확인해서 그렇다면 통과시킨다. DB 조회는 실패 경로에서만 하므로
     정상 상황의 예측 성능에는 영향이 없다.
+
+    반대 방향(기동 때 끊겨 있다가 뒤에 살아남)은 auth.db_ready() 가 맡는다 - 기동 시점의
+    판정을 상수로 들고 있으면 그 뒤로 영원히 인증이 꺼진 채 고정되기 때문이다.
     """
-    if not _DB_READY:
+    if not auth.db_ready():
         return None
     try:
         return auth.require_user(authorization)
