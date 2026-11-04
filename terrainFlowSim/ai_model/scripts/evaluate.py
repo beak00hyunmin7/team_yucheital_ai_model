@@ -128,7 +128,11 @@ class Predictor:
     상수는 inference_api._run / _image_to_depth와 같게 유지한다.
     """
 
-    def __init__(self, checkpoint, image_size):
+    def __init__(self, checkpoint, image_size, elev_dir=None, elev_only=False):
+        # elev_dir: 학습 때 고도 채널을 붙였다면 평가에서도 똑같이 붙여야 한다
+        # (config 의 elev_dir 을 그대로 넘겨받으므로 학습/평가가 어긋날 일이 없다).
+        self.elev_dir = elev_dir
+        self.elev_only = elev_only
         os.environ["AI_MODEL_IMAGE_SIZE"] = str(image_size)
         from src import inference_api  # 환경변수 반영을 위해 늦게 import
         self.api = inference_api
@@ -140,11 +144,34 @@ class Predictor:
         self.lut = torch.from_numpy(inference_api._LUT).to(self.device)  # (256, 3)
 
     def _to_input(self, path):
+        if self.elev_only:
+            return self._elev(os.path.basename(path))   # 등고선 없이 고도만
+        img = Image.open(path).convert("RGB")
+        if img.size != (self.image_size, self.image_size):
+            img = img.resize((self.image_size, self.image_size), Image.BILINEAR)
+        t = torch.from_numpy(np.asarray(img).astype(np.float32) / 255.0).permute(2, 0, 1)
+        t = (t - 0.5) / 0.5
+        if self.elev_dir:
+            t = torch.cat([t, self._elev(os.path.basename(path))], dim=0)
+        return t
+
+    def _to_target(self, path):
+        """타깃(수심 RGB) 전용. 입력과 달리 고도 채널을 붙이지 않는다 - 모델 출력은 항상 3채널."""
         img = Image.open(path).convert("RGB")
         if img.size != (self.image_size, self.image_size):
             img = img.resize((self.image_size, self.image_size), Image.BILINEAR)
         t = torch.from_numpy(np.asarray(img).astype(np.float32) / 255.0).permute(2, 0, 1)
         return (t - 0.5) / 0.5
+
+    def _elev(self, name):
+        """고도 채널 (1, S, S). 학습 데이터셋과 같은 규칙: 시점 접미사를 떼고 찾는다."""
+        key = re.sub(r"_t\d+$", "", os.path.splitext(name)[0])
+        arr = np.load(os.path.join(self.elev_dir, key + ".npy")).astype(np.float32)
+        e = torch.from_numpy(arr)[None, None]
+        if e.shape[-1] != self.image_size:
+            e = torch.nn.functional.interpolate(e, size=(self.image_size, self.image_size),
+                                                 mode="bilinear", align_corners=False)
+        return (e[0] - 0.5) / 0.5
 
     def cond(self, rain_mm, time_s):
         if self.cond_dim == 0:
@@ -245,7 +272,10 @@ def evaluate(args):
     rain_values = json.load(open(os.path.join(ROOT, cfg["rain_values_json"]), encoding="utf-8"))
     time_values = json.load(open(os.path.join(ROOT, cfg["time_values_json"]), encoding="utf-8"))
 
-    pred = Predictor(os.path.join(ROOT, args.checkpoint), image_size)
+    elev_dir = cfg.get("elev_dir")
+    pred = Predictor(os.path.join(ROOT, args.checkpoint), image_size,
+                     elev_dir=os.path.join(ROOT, elev_dir) if elev_dir else None,
+                     elev_only=bool(cfg.get("elev_only")))
     print(f"체크포인트: {args.checkpoint} (in_ch={pred.in_channels}, cond_dim={pred.cond_dim}, "
           f"device={pred.device})")
     if pred.cond_dim != 2:
@@ -278,7 +308,7 @@ def evaluate(args):
         out_t = pred.forward(paths, conds)
 
         # 타깃공간 L1: 학습 로그의 val L1과 같은 정의 ([-1,1] 공간 평균 절대오차)
-        tgt = torch.stack([pred._to_input(os.path.join(flow_dir, m[0])) for m in metas]).to(pred.device)
+        tgt = torch.stack([pred._to_target(os.path.join(flow_dir, m[0])) for m in metas]).to(pred.device)
         l1_each = (out_t - tgt).abs().mean(dim=(1, 2, 3)).cpu().numpy()
 
         gt_shape = metas[0][5][0].shape

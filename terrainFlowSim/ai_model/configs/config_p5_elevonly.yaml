@@ -1,0 +1,53 @@
+# Phase 4 — 고도 채널 추가. wet8 에서 elev_dir 하나만 더한 조건.
+#
+# 왜: scripts/diagnose_input_info.py 결과, 학습 입력인 등고선 그림은 고도를 20단계
+# (평균 고저차 31.5m 기준 한 칸 1.58m)로 양자화한다. 배수 물길은 그보다 얕게 파여 있어
+# 같은 색 띠 안에 묻히고, 실제로 원본 고도 대비 **물길 위치 일치 IoU 가 0.216** 까지
+# 떨어진다. 모델이 못 그리는 그 구조가 애초에 입력에 없었다.
+#
+# 이게 기울기(고주파) 손실이 번짐을 전혀 줄이지 못한 이유로 보인다(sigma 2.25 -> 2.50).
+# 없는 정보를 그려내라고 요구한 셈이라, 손실을 어떻게 바꿔도 안 움직인다.
+#
+# 이 조건은 등고선 RGB(3채널) 뒤에 원본 고도(1채널)를 이어붙인다 -> in_channels=4.
+# 나머지는 config_p2_wet8.yaml 과 완전히 동일하므로, 차이가 나면 원인은 고도 채널뿐이다.
+#
+# 준비: .venv\Scripts\python.exe scripts\build_elev_channel.py
+
+contours_dir: "data/contours"
+flow_dir: "data/flow"
+rain_values_json: "data/rain_values.json"
+time_values_json: "data/time_values.json"
+elev_dir: "data/elev"
+
+image_size: 128
+ngf: 32
+val_split: 0.15
+seed: 42
+
+mode: "unet"
+gan_loss: "lsgan"
+batch_size: 16
+num_workers: 4
+epochs: 45
+lr: 0.0002
+beta1: 0.5
+lambda_l1: 100.0
+wet_weight: 8.0
+
+save_epoch_freq: 10
+sample_epoch_freq: 2
+log_iter_freq: 200
+patience: 10
+
+checkpoint_dir: "checkpoints_p5_elevonly"
+output_dir: "outputs_p5_elevonly"
+
+# Phase 5 — 등고선을 빼고 고도만 입력 (in_channels=1).
+#
+# p4_elev(고도를 4번째 채널로 추가)는 모델이 그 채널을 사실상 무시해서 가설 검증에
+# 실패했다: 고도 채널을 0으로 지워도 출력 변화가 표준편차의 1.1%에 불과했다.
+# 선택지를 없애면 모델은 고도를 쓸 수밖에 없다.
+#
+# 이 조건이 좋아지면 "입력의 등고선 양자화가 병목"이 확인되고, 배포 입력을 고도 격자로
+# 바꾸는 게 맞다. 안 좋아지면 병목은 입력이 아니라 다른 곳이다.
+elev_only: true

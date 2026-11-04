@@ -42,7 +42,12 @@ def main(cfg):
     cond_dim = int(bool(rain_values_json)) + int(bool(time_values_json))
     if cond_dim == 0:
         cond_dim = 1  # use_film=False라 실제로 안 쓰이지만 생성자 인자 형식상 기본값
-    in_channels = cfg.get("in_channels", 4 if rain_dir else 3)
+    elev_dir = cfg.get("elev_dir")        # 주면 고도 격자를 입력 채널로 추가
+    elev_only = bool(cfg.get("elev_only"))  # 켜면 등고선을 빼고 고도만 입력 (in_channels=1)
+    if elev_only:
+        in_channels = cfg.get("in_channels", 1)
+    else:
+        in_channels = cfg.get("in_channels", 3 + int(bool(rain_dir)) + int(bool(elev_dir)))
 
     train_names, val_names = split_train_val(
         cfg["contours_dir"], cfg["flow_dir"], val_split=cfg["val_split"], seed=cfg["seed"]
@@ -65,11 +70,11 @@ def main(cfg):
     train_set = ContourFlowDataset(cfg["contours_dir"], cfg["flow_dir"],
                                     image_size=cfg["image_size"], augment=True, names=train_names,
                                     rain_dir=rain_dir, rain_values_json=rain_values_json,
-                                    time_values_json=time_values_json)
+                                    time_values_json=time_values_json, elev_dir=elev_dir, elev_only=elev_only)
     val_set = ContourFlowDataset(cfg["contours_dir"], cfg["flow_dir"],
                                   image_size=cfg["image_size"], augment=False, names=val_names,
                                   rain_dir=rain_dir, rain_values_json=rain_values_json,
-                                  time_values_json=time_values_json) \
+                                  time_values_json=time_values_json, elev_dir=elev_dir, elev_only=elev_only) \
         if val_names else None
 
     train_loader = DataLoader(train_set, batch_size=cfg["batch_size"], shuffle=True,
@@ -88,6 +93,8 @@ def main(cfg):
         lr=cfg["lr"], beta1=cfg["beta1"], lambda_l1=cfg["lambda_l1"], gan_loss=cfg["gan_loss"],
         device=device, use_film=use_film, cond_dim=cond_dim, ngf=cfg.get("ngf", 64),
         wet_weight=cfg.get("wet_weight", 1.0),
+        grad_weight=cfg.get("grad_weight", 0.0),
+        grad_scales=tuple(cfg.get("grad_scales", (1, 2, 4))),
     )
 
     os.makedirs(cfg["checkpoint_dir"], exist_ok=True)
