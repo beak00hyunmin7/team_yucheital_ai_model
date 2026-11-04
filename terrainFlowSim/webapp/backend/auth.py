@@ -5,7 +5,7 @@
 DB 는 MySQL 그대로 사용. 접속 정보는 환경변수로 덮어쓸 수 있다.
 
   YUCHE_DB_URL   기본 mysql+pymysql://root:1234@127.0.0.1:3306/yuche_db
-  YUCHE_SECRET   로그인 토큰 서명 키 (기본은 개발용 고정값 — 배포 시 반드시 교체)
+  YUCHE_SECRET   로그인 토큰 서명 키. 안 주면 webapp/.yuche_secret 에 임의값을 만들어 쓴다
 
 로그인하면 HMAC 서명 토큰을 돌려주고, 프런트가 그걸 저장했다가
 `Authorization: Bearer <token>` 로 /api/predict 를 호출한다.
@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 
 import re
@@ -32,7 +33,39 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 DB_URL = os.environ.get(
     "YUCHE_DB_URL", "mysql+pymysql://root:1234@127.0.0.1:3306/yuche_db?charset=utf8mb4"
 )
-SECRET = os.environ.get("YUCHE_SECRET", "dev-only-change-me").encode()
+def _load_secret() -> bytes:
+    """토큰 서명 키. 환경변수 > 로컬 파일 > (쓰기 실패 시) 메모리 전용 임의값.
+
+    예전 기본값은 "dev-only-change-me" 고정이었다. 127.0.0.1 전용일 때는 넘어갈 수 있지만
+    랜에 열어두는 순간 위험해진다 - 이 저장소는 공개라 키가 그대로 적혀 있고, 서명 키를
+    아는 사람은 아무 이메일로나 유효한 토큰을 **가입 없이** 만들어 낼 수 있다.
+    (verify_token 은 서명과 만료만 보고 DB 를 조회하지 않는다.)
+
+    그래서 기본값을 없애고 기기마다 다른 임의값을 쓴다. 파일로 남기므로 서버를 재시작해도
+    이미 로그인한 사람이 튕기지 않는다. 키를 바꾸고 싶으면 .yuche_secret 을 지우면 된다.
+    """
+    env = os.environ.get("YUCHE_SECRET")
+    if env:
+        return env.encode()
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        ".yuche_secret")
+    try:
+        if os.path.exists(path):
+            saved = open(path, encoding="ascii").read().strip()
+            if saved:
+                return saved.encode()
+        value = secrets.token_urlsafe(48)
+        with open(path, "w", encoding="ascii") as f:
+            f.write(value)
+        return value.encode()
+    except OSError:
+        # 파일을 못 쓰는 환경이면 프로세스 안에서만 유효한 키를 쓴다.
+        # (재시작하면 기존 토큰이 전부 무효가 되지만, 고정값을 쓰는 것보다 낫다.)
+        return secrets.token_urlsafe(48).encode()
+
+
+SECRET = _load_secret()
 TOKEN_TTL = 60 * 60 * 12  # 12시간
 
 engine = create_engine(DB_URL, pool_pre_ping=True, pool_recycle=280)

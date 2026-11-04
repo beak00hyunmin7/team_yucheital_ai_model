@@ -33,6 +33,35 @@ cd project\terrainFlowSim\webapp
 
 브라우저에서 <http://127.0.0.1:8000> · API 문서 <http://127.0.0.1:8000/docs>
 
+## 같은 공유기의 다른 PC·폰에서 접속
+
+`run_windows.bat` 은 `0.0.0.0` 에 바인딩하므로 서버 쪽은 준비돼 있다. 기동하면 접속 주소를
+직접 찍어준다. 프런트는 `const API = location.origin` 이라 다른 호스트로 들어와도 그대로 돈다.
+
+남은 건 **방화벽 1회 허용**이다. 관리자 PowerShell 에서 한 번만:
+
+```powershell
+New-NetFirewallRule -DisplayName "yuche webapp 8000" -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8000 -Profile Private
+```
+
+`-Profile Private` 이 핵심이다. 공유기 네트워크가 Windows 에서 "공용"으로 잡혀 있으면 규칙이
+안 먹으므로, 설정 > 네트워크에서 해당 연결을 **개인 네트워크**로 바꿔야 한다.
+
+되돌릴 때: `Remove-NetFirewallRule -DisplayName "yuche webapp 8000"`
+이 PC 에서만 쓰려면 `run_windows.bat` 의 `set BIND=0.0.0.0` 을 `127.0.0.1` 로.
+
+### 열기 전에 알아둘 것
+
+- **HTTP 평문이다.** 로그인 비밀번호가 같은 네트워크에서 그대로 보인다. 공용 Wi-Fi 에서는
+  진짜 비밀번호를 쓰지 말 것.
+- 토큰 서명 키는 이제 기기마다 임의 생성된다(`webapp/.yuche_secret`, git 제외).
+  예전 고정 기본값 `dev-only-change-me` 는 이 저장소가 공개라 키가 그대로 적혀 있었고,
+  서명 키를 아는 사람은 **가입 없이** 아무 이메일로나 유효한 토큰을 만들 수 있었다
+  (`verify_token` 은 서명과 만료만 보고 DB 를 조회하지 않는다). 랜에 여는 이상 이건 막아야 한다.
+- 인터넷 전체에 공개하는 건 다른 얘기다. 위 두 가지(HTTPS, 토큰 설계) 먼저 손봐야 하고,
+  포트포워딩 대신 Tailscale 이나 Cloudflare Tunnel 을 쓰는 쪽이 훨씬 안전하다.
+
 ## 회원가입 / 로그인 (MySQL)
 
 - DB 는 **WSL Ubuntu 안의 MariaDB**(MySQL 호환). Windows 쪽 Python 이 `localhost:3306` 으로 접속.

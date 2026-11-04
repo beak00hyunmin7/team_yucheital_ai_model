@@ -43,8 +43,23 @@ start "yuche-wsl-keepalive" /min wsl -d Ubuntu-22.04 -u root -- sleep infinity
 echo [3/4] 웹 서버 의존성 확인...
 "%VENV_PY%" -m pip install -q -r backend\requirements.txt
 
-echo [4/4] 서버 시작: http://127.0.0.1:8000
-"%VENV_PY%" -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000
+REM 같은 공유기에 물린 다른 PC/폰에서도 들어올 수 있게 모든 인터페이스에 바인딩한다.
+REM 이 PC 에서만 쓰려면 아래 BIND 를 127.0.0.1 로 바꾸면 된다.
+REM 방화벽은 최초 1회만 열어주면 된다 (관리자 PowerShell):
+REM   New-NetFirewallRule -DisplayName "yuche webapp 8000" -Direction Inbound ^
+REM     -Action Allow -Protocol TCP -LocalPort 8000 -Profile Private
+set BIND=0.0.0.0
+
+for /f "usebackq tokens=*" %%i in (`powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 ^| Where-Object { $_.PrefixOrigin -eq 'Dhcp' -and $_.IPAddress -notlike '169.254.*' } ^| Select-Object -First 1).IPAddress"`) do set LANIP=%%i
+
+echo [4/4] 서버 시작
+echo       이 PC        : http://127.0.0.1:8000
+if defined LANIP echo       같은 공유기  : http://%LANIP%:8000
+if not defined LANIP echo       (랜 주소를 못 찾았습니다 - ipconfig 로 확인하세요)
+echo.
+if "%BIND%"=="0.0.0.0" echo       * 같은 네트워크에 있는 사람은 누구나 들어올 수 있습니다.
+echo.
+"%VENV_PY%" -m uvicorn app:app --app-dir backend --host %BIND% --port 8000
 
 REM 서버가 멈추면 닻도 내린다 (안 내리면 WSL VM 이 계속 메모리를 잡고 있는다).
 echo 종료 - WSL 유지용 프로세스 정리...
