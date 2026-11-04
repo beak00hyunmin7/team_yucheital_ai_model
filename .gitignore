@@ -39,3 +39,7 @@ terrainFlowSim/ai_model/deploy_package.zip
 terrainFlowSim/ai_model/data_scalar/
 terrainFlowSim/webapp/run_windows.bat.bak
 *.bak
+
+# 샘플_등고선: OpenFOAM 시험 실행 로그(20MB, tqdm/mpi 출력)와 재생성 가능한 압축본
+샘플_등고선/*.zip
+샘플_등고선/sample_check/openfoam_result/batch_log.txt

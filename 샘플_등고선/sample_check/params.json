@@ -1,0 +1,14 @@
+{
+  "sample": "sample_check",
+  "center_x": 203663.12546531524,
+  "center_y": 460066.57157592877,
+  "dx": 10.416666666666666,
+  "size": 96,
+  "relief_m": 82.49339294433594,
+  "max_slope": 0.34736567735671997,
+  "mean_slope": 0.10717183351516724,
+  "total_time_s": 120.0,
+  "rain_mm": 50.0,
+  "film_depth_m": 0.05,
+  "source": "seoul_contour_5000"
+}
