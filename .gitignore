@@ -39,3 +39,6 @@ terrainFlowSim/ai_model/deploy_package.zip
 terrainFlowSim/ai_model/data_scalar/
 terrainFlowSim/webapp/run_windows.bat.bak
 *.bak
+
+# 분석 기록 썸네일 (서버 실행 시 생성, 사용자 데이터)
+terrainFlowSim/webapp/data/
