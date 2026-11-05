@@ -401,7 +401,18 @@ async def predict(
             drain = {
                 "pixel": {"x": int(c), "y": int(r)},
                 "normalized": {"x": round(c / max(w - 1, 1), 4), "y": round(r / max(h - 1, 1), 4)},
+                # 화면 그림(입력 등고선·예측·오버레이) 위 위치. 왼쪽 위 = (0, 0).
+                # 그림은 terrain 배열과 상하가 반대라서 y 를 뒤집는다.
+                "image": {"x": round(c / max(w - 1, 1), 4), "y": round(1 - r / max(h - 1, 1), 4)},
             }
+        else:
+            # 이미지 모드: 고도값이 없어 분석 지도는 못 그리지만, 예측 그림에서 유출이 가장
+            # 강한 점은 찾을 수 있다. 예측 그림은 입력 이미지와 같은 방향이라 뒤집기 보정이 필요 없다.
+            ph, pw = pred_img.height, pred_img.width
+            inten = intensity_from_prediction(pred_img, (ph, pw))
+            r, c = np.unravel_index(int(np.argmax(inten)), inten.shape)
+            pos = {"x": round(c / max(pw - 1, 1), 4), "y": round(r / max(ph - 1, 1), 4)}
+            drain = {"pixel": {"x": int(c), "y": int(r)}, "normalized": pos, "image": pos}
 
     except InvalidTerrainData as exc:
         raise HTTPException(422, str(exc)) from exc
