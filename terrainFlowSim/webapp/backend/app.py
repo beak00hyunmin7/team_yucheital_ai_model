@@ -70,6 +70,7 @@ from src.ground_truth import (  # noqa: E402
 from terrain_io import InvalidTerrainData, load_terrain  # noqa: E402
 from analysis_figure import intensity_from_prediction, render_analysis_figure  # noqa: E402
 import auth  # noqa: E402  (회원가입/로그인 + MySQL)
+import history  # noqa: E402  (분석 기록 저장: MySQL + 썸네일 파일). auth.init_db() 전에 import 해야 테이블이 같이 생성됨
 
 RAIN_MIN_MM, RAIN_MAX_MM = 20.0, 80.0          # 학습 데이터가 다룬 강우 범위
 TIME_MIN_S, TIME_MAX_S = 0.0, 120.0            # 학습 데이터가 다룬 경과 시간 범위
@@ -93,10 +94,11 @@ app = FastAPI(title="예측 배수맵 API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],   # 기록 이름변경/삭제(PATCH/DELETE) 허용
     allow_headers=["*"],
 )
 app.include_router(auth.router)
+app.include_router(history.router)
 _DB_READY = auth.init_db()   # MySQL 없으면 False (앱은 뜨고 인증만 비활성)
 
 
