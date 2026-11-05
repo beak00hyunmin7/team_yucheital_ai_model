@@ -28,12 +28,13 @@ import hashlib
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, DateTime, String, Text, func
+from sqlalchemy import Column, DateTime, String, Text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -50,7 +51,8 @@ class AnalysisHistory(Base):
 
     id = Column(String(32), primary_key=True)
     user_email = Column(String(255), index=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    # 시각은 DB 서버 시간대(WSL MariaDB 는 보통 UTC)에 맡기지 않고 파이썬에서 UTC 로 넣는다
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)
     name = Column(String(100), nullable=True)            # null 이면 프런트가 '날짜 시간' 표시
     file_name = Column(String(255), nullable=True)       # 사용자가 올린 입력 파일 이름
     params_json = Column(Text, nullable=True)            # {mode, rain_mm, time_s, dx}
@@ -125,7 +127,7 @@ def _thumbnail_data_url(rel_path: str | None) -> str | None:
     if not rel_path:
         return None
     path = (HISTORY_DIR / rel_path).resolve()
-    if not str(path).startswith(str(HISTORY_DIR)) or not path.is_file():
+    if not path.is_relative_to(HISTORY_DIR) or not path.is_file():
         return None
     mime = "image/png" if path.suffix == ".png" else "image/jpeg"
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
@@ -135,7 +137,7 @@ def _delete_thumbnail(rel_path: str | None) -> None:
     if not rel_path:
         return
     path = (HISTORY_DIR / rel_path).resolve()
-    if str(path).startswith(str(HISTORY_DIR)) and path.is_file():
+    if path.is_relative_to(HISTORY_DIR) and path.is_file():
         path.unlink()
 
 
@@ -149,7 +151,8 @@ def _dumps(value) -> str | None:
 
 def _to_dict(r: AnalysisHistory) -> dict:
     """프런트가 쓰던 localStorage 기록과 같은 모양으로 돌려준다 (프런트 렌더 코드 그대로 사용)."""
-    created = r.created_at.isoformat() if r.created_at else None
+    # DB 에는 UTC 를 시간대 없이 저장하므로, 돌려줄 때 UTC 표시(+00:00)를 붙여야 브라우저가 한국 시간으로 바꿔 보여준다
+    created = r.created_at.replace(tzinfo=timezone.utc).isoformat() if r.created_at else None
     return {
         "id": r.id,
         "createdAt": created,
