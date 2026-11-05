@@ -35,10 +35,13 @@ REM (MariaDB 는 systemd 로 enabled 되어 있어서 VM 이 다시 뜰 때 자동 기동된다 - 
 REM  "wsl 명령을 쓴 직후에는 되고 조금 두면 안 되는" 모습으로 보인다.)
 REM 실측: wsl 명령 직후 5/5 연결 성공, 1~2분 방치 후 20/20 연결거부(WinError 10061),
 REM 그 상태에서 wsl 로 들어가 보면 uptime 이 "up 0 minutes" - VM 이 새로 뜬 것이다.
-REM 서버가 도는 동안 VM 을 붙잡아 둘 닻 프로세스를 띄운다. 이게 없으면 몇 분 뒤
+REM 서버가 도는 동안 VM 을 계속 깨워 둘 유지용 루프를 띄운다. 이게 없으면 몇 분 뒤
 REM 회원가입/로그인이 조용히 죽는다.
 echo [2/4] WSL 유지용 프로세스 시작...
-start "yuche-wsl-keepalive" /min wsl -d Ubuntu-22.04 -u root -- sleep infinity
+rem   WSL 안쪽에 sleep 프로세스를 띄워두는 것만으로는 부족하다. VM 이 살아 있어도
+rem   Windows -> WSL 의 127.0.0.1:3306 포워딩이 따로 끊기기 때문에, Windows 쪽에서
+rem   주기적으로 wsl 명령을 날려 VM 유지와 포워딩 갱신을 동시에 한다.
+start "yuche-wsl-keepalive" /min cmd /c "for /l %%k in (1,0,2) do (wsl -d Ubuntu-22.04 -u root -- true & timeout /t 45 /nobreak >nul)"
 
 echo [3/4] 웹 서버 의존성 확인...
 "%VENV_PY%" -m pip install -q -r backend\requirements.txt
@@ -61,8 +64,8 @@ if "%BIND%"=="0.0.0.0" echo       * 같은 네트워크에 있는 사람은 누구나 들어올 수
 echo.
 "%VENV_PY%" -m uvicorn app:app --app-dir backend --host %BIND% --port 8000
 
-REM 서버가 멈추면 닻도 내린다 (안 내리면 WSL VM 이 계속 메모리를 잡고 있는다).
+REM 서버가 멈추면 유지용 루프도 닫는다 (안 닫으면 WSL VM 이 계속 메모리를 잡고 있는다).
 echo 종료 - WSL 유지용 프로세스 정리...
-wsl -d Ubuntu-22.04 -u root -- pkill -f "sleep infinity" >nul 2>&1
+taskkill /fi "WINDOWTITLE eq yuche-wsl-keepalive" /f >nul 2>&1
 
 endlocal
