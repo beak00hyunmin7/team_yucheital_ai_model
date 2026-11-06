@@ -33,6 +33,35 @@ cd project\terrainFlowSim\webapp
 
 브라우저에서 <http://127.0.0.1:8000> · API 문서 <http://127.0.0.1:8000/docs>
 
+## 같은 공유기의 다른 PC·폰에서 접속
+
+`run_windows.bat` 은 `0.0.0.0` 에 바인딩하므로 서버 쪽은 준비돼 있다. 기동하면 접속 주소를
+직접 찍어준다. 프런트는 `const API = location.origin` 이라 다른 호스트로 들어와도 그대로 돈다.
+
+남은 건 **방화벽 1회 허용**이다. 관리자 PowerShell 에서 한 번만:
+
+```powershell
+New-NetFirewallRule -DisplayName "yuche webapp 8000" -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8000 -Profile Private
+```
+
+`-Profile Private` 이 핵심이다. 공유기 네트워크가 Windows 에서 "공용"으로 잡혀 있으면 규칙이
+안 먹으므로, 설정 > 네트워크에서 해당 연결을 **개인 네트워크**로 바꿔야 한다.
+
+되돌릴 때: `Remove-NetFirewallRule -DisplayName "yuche webapp 8000"`
+이 PC 에서만 쓰려면 `run_windows.bat` 의 `set BIND=0.0.0.0` 을 `127.0.0.1` 로.
+
+### 열기 전에 알아둘 것
+
+- **HTTP 평문이다.** 로그인 비밀번호가 같은 네트워크에서 그대로 보인다. 공용 Wi-Fi 에서는
+  진짜 비밀번호를 쓰지 말 것.
+- 토큰 서명 키는 이제 기기마다 임의 생성된다(`webapp/.yuche_secret`, git 제외).
+  예전 고정 기본값 `dev-only-change-me` 는 이 저장소가 공개라 키가 그대로 적혀 있었고,
+  서명 키를 아는 사람은 **가입 없이** 아무 이메일로나 유효한 토큰을 만들 수 있었다
+  (`verify_token` 은 서명과 만료만 보고 DB 를 조회하지 않는다). 랜에 여는 이상 이건 막아야 한다.
+- 인터넷 전체에 공개하는 건 다른 얘기다. 위 두 가지(HTTPS, 토큰 설계) 먼저 손봐야 하고,
+  포트포워딩 대신 Tailscale 이나 Cloudflare Tunnel 을 쓰는 쪽이 훨씬 안전하다.
+
 ## 회원가입 / 로그인 (MySQL)
 
 - DB 는 **WSL Ubuntu 안의 MariaDB**(MySQL 호환). Windows 쪽 Python 이 `localhost:3306` 으로 접속.
@@ -58,8 +87,34 @@ wsl -d Ubuntu-22.04 -u root -- bash -lc '
 '
 ```
 
-`users` 테이블(id, email, password_hash, created_at)은 서버 첫 기동 시 자동 생성.
+`users` 테이블(id, email, password_hash, created_at)은 DB 에 처음 연결되는 순간 자동 생성.
 WSL/PC 를 재시작하면 `service mariadb start` 를 다시 해야 함 (run_windows.bat 이 대신 해줌).
+
+### WSL2 가 저절로 꺼져서 DB 가 끊기는 문제 (2026-11-04 해결)
+
+증상은 "조금 전까지 되던 로그인이 몇 분 뒤 안 된다" 였다. 원인은 DB 가 아니라 **WSL2 VM
+자체가 유휴 상태에서 종료되는 것**이다. VM 이 내려가면 그 안의 MariaDB 도 같이 죽는다.
+
+실측: `wsl` 명령 직후에는 `127.0.0.1:3306` 연결이 5/5 성공하고, 1~2분 방치하면 20/20
+연결거부(WinError 10061)가 난다. 그 상태에서 WSL 에 들어가 보면 `uptime` 이 "up 0 minutes"
+— VM 이 방금 새로 뜬 것이다. MariaDB 는 systemd 에 enabled 되어 있어 VM 이 뜰 때 자동
+기동되므로 "WSL 을 건드리면 되살아나는" 것처럼 보여서 포워딩 문제로 오해하기 쉽다.
+
+대책 두 가지를 같이 넣었다.
+
+1. `run_windows.bat` 이 서버가 도는 동안 **Windows 쪽에서 45 초마다 `wsl ... true` 를 날리는
+   심장박동 루프**를 띄운다 (`yuche-wsl-keepalive` 창, 서버 종료 시 `taskkill` 로 정리).
+   처음에는 WSL 안쪽에 `sleep infinity` 를 띄우는 방식이었는데, 그것만으로는 부족하다 —
+   VM 과 mariadb 가 멀쩡히 살아 있는데도 Windows → WSL 의 `127.0.0.1:3306` **포워딩이
+   따로 끊기는** 두 번째 고장 모드가 있다 (2026-11-05 재현). Windows 에서 `wsl` 명령을
+   한 번 날리면 포워딩이 되살아나므로, 바깥에서 주기적으로 찔러 두 고장 모드를 함께 막는다.
+2. `auth.db_ready()` 가 DB 준비 상태를 **그때그때 다시 판정**한다(5초 캐시). 기동 시점의
+   판정을 상수로 들고 있으면, 기동 때 DB 가 꺼져 있었다는 이유만으로 그 뒤 DB 가 살아나도
+   프로세스가 죽을 때까지 인증이 비활성으로 고정된다. 실제로 그 상태로 서버가 떠서
+   회원가입·로그인이 조용히 죽어 있었다.
+
+`/api/health` 의 `db_error` 로 끊긴 이유를 바로 확인할 수 있다 (예전에는 예외를 통째로
+버려서 "down" 말고는 알 수 있는 게 없었다).
 
 ## 결과 그림
 

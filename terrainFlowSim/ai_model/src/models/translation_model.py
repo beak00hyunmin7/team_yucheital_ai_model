@@ -18,12 +18,15 @@ from src.models.discriminator import NLayerDiscriminator
 class TranslationModel:
     def __init__(self, mode="unet", in_channels=3, out_channels=3, image_size=256,
                  lr=0.0002, beta1=0.5, lambda_l1=100.0, gan_loss="vanilla", device="cpu",
-                 use_film=False, cond_dim=1, ngf=64, wet_weight=1.0):
+                 use_film=False, cond_dim=1, ngf=64, wet_weight=1.0,
+                 grad_weight=0.0, grad_scales=(1, 2, 4)):
         self.mode = mode
         self.device = device
         self.lambda_l1 = lambda_l1
         self.use_film = use_film
         self.wet_weight = wet_weight
+        self.grad_weight = grad_weight
+        self.grad_scales = tuple(grad_scales)
 
         self.netG = UnetGenerator(in_channels=in_channels, out_channels=out_channels,
                                    image_size=image_size, ngf=ngf, use_film=use_film,
@@ -57,6 +60,35 @@ class TranslationModel:
         wetness = 1.0 - (real[:, 0:1] + 1.0) * 0.5          # [-1,1] -> [0,1], 흰색=0
         w = 1.0 + (self.wet_weight - 1.0) * wetness.clamp(0.0, 1.0)
         return ((fake - real).abs() * w).mean() / w.mean()
+
+    def _grad_l1(self, fake, real):
+        """공간 기울기(고주파)의 L1. 흐릿함을 직접 벌한다.
+
+        진단 결과(scripts/diagnose_sharpness.py) 이 모델의 피크 과소예측은 "크기 축소"가
+        아니라 **번짐**이었다. 예측은 사실상 정답을 sigma≈2.2픽셀(96격자)로 흐린 것과
+        같았고, 얕은 구간은 오히려 과대예측(1.7배)이며 가장 깊은 구간만 과소예측(0.74배)
+        이었다 - 물이 봉우리에서 주변으로 옮겨간 형태다.
+
+        값 자체의 L1 은 번짐을 벌하지 못한다. 흐린 답도 평균적으로는 맞기 때문이다.
+        기울기를 맞추라고 요구하면 경계를 뭉갤 때 바로 손해가 난다.
+
+        여러 stride 로 재는 이유: stride 1 차분은 1픽셀 규모의 변화만 본다. 실제 번짐은
+        sigma≈2 규모라 그 크기의 구조를 보려면 더 떨어진 픽셀끼리도 비교해야 한다.
+        """
+        total = 0.0
+        for s in self.grad_scales:
+            for dim in (-1, -2):
+                df = fake.narrow(dim, s, fake.size(dim) - s) - fake.narrow(dim, 0, fake.size(dim) - s)
+                dr = real.narrow(dim, s, real.size(dim) - s) - real.narrow(dim, 0, real.size(dim) - s)
+                total = total + (df - dr).abs().mean()
+        return total / (len(self.grad_scales) * 2)
+
+    def _recon(self, fake, real):
+        """재구성 손실 = 젖은 픽셀 가중 L1 (+ 기울기 손실)."""
+        loss = self._l1(fake, real)
+        if self.grad_weight > 0:
+            loss = loss + self.grad_weight * self._grad_l1(fake, real)
+        return loss
 
     def set_input(self, batch):
         self.real_input = batch["input"].to(self.device)
@@ -95,7 +127,7 @@ class TranslationModel:
             fake_pair = torch.cat([self.real_input, self.fake_target], dim=1)
             pred_fake = self.netD(fake_pair)
             loss_g_gan = self.criterion_gan(pred_fake, self._gan_target(pred_fake, True))
-            loss_g_l1 = self._l1(self.fake_target, self.real_target) * self.lambda_l1
+            loss_g_l1 = self._recon(self.fake_target, self.real_target) * self.lambda_l1
             loss_g = loss_g_gan + loss_g_l1
             loss_g.backward()
             self.optimizer_G.step()
@@ -104,7 +136,7 @@ class TranslationModel:
         else:
             # 순수 오토인코더(U-Net) 모드: L1 재구성 손실만 사용
             self.optimizer_G.zero_grad()
-            loss_g_l1 = self._l1(self.fake_target, self.real_target)
+            loss_g_l1 = self._recon(self.fake_target, self.real_target)
             loss_g_l1.backward()
             self.optimizer_G.step()
             losses["loss_G_l1"] = loss_g_l1.item()

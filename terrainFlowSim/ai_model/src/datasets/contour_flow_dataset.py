@@ -13,6 +13,7 @@ import json
 import os
 import re
 
+import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -52,7 +53,7 @@ def _group_key(name):
 
 class ContourFlowDataset(Dataset):
     def __init__(self, contours_dir, flow_dir, image_size=256, augment=False, names=None,
-                 rain_dir=None, rain_values_json=None, time_values_json=None):
+                 rain_dir=None, rain_values_json=None, time_values_json=None, elev_dir=None, elev_only=False):
         """rain_dir을 주면 등고선(3채널)에 강우 채널(1채널)을 이어붙여 4채널 입력을
         만든다 (data/rain/<name>.png, 균일한 값의 타일 이미지로 강우량을 인코딩) - 채널
         결합 방식, config_raincond.yaml에서 씀.
@@ -68,6 +69,24 @@ class ContourFlowDataset(Dataset):
         self.contours_dir = contours_dir
         self.flow_dir = flow_dir
         self.rain_dir = rain_dir
+
+        # elev_dir: 고도 격자를 입력 4번째 채널로 붙인다 (scripts/build_elev_channel.py).
+        #
+        # 등고선 그림은 contourf(levels=20) 으로 고도를 20단계(한 칸 약 1.6m)로 양자화하는데,
+        # 배수 물길은 그보다 얕게 파여 있어 같은 색 띠 안에 묻힌다. 실측으로 물길 위치
+        # 일치 IoU 가 0.216 까지 떨어진다(scripts/diagnose_input_info.py). 즉 모델이 못 그리는
+        # 구조가 애초에 입력에 없다. 원본 고도를 그대로 넣어 그 정보를 되살린다.
+        self.elev_dir = elev_dir
+
+        # elev_only: 등고선을 빼고 고도만 입력으로 준다 (in_channels=1).
+        #
+        # 고도를 4번째 채널로 "추가"만 했더니 모델이 사실상 무시했다 - 채널을 0으로 지워도
+        # 출력 변화가 표준편차의 1.1%에 불과했다. 손실은 넓은 영역이 지배하고 등고선만으로도
+        # 그건 맞출 수 있으니, 얇은 물길에만 쓸모 있는 채널을 배울 유인이 없었던 것이다.
+        # 선택지를 없애면 모델은 고도를 쓸 수밖에 없고, 그래야 "입력 정보가 병목인가"를
+        # 실제로 검증할 수 있다.
+        self.elev_only = elev_only
+        self.image_size = image_size
 
         self.rain_values = None
         if rain_values_json is not None:
@@ -123,16 +142,39 @@ class ContourFlowDataset(Dataset):
         ])
         self.augment = augment
 
+    def _load_elev(self, name, size):
+        """(1, size, size) 텐서로 고도를 읽는다. 값 범위는 다른 채널과 같은 [-1, 1].
+
+        고도는 시점(_t0..)에 따라 변하지 않으므로 파일에는 시점 접미사가 없다.
+        """
+        key = re.sub(r"_t\d+$", "", os.path.splitext(name)[0])
+        path = os.path.join(self.elev_dir, key + ".npy")
+        arr = np.load(path).astype(np.float32)
+        t = torch.from_numpy(arr)[None, None]
+        if t.shape[-1] != size or t.shape[-2] != size:
+            t = torch.nn.functional.interpolate(t, size=(size, size),
+                                                 mode="bilinear", align_corners=False)
+        return (t[0] - 0.5) / 0.5
+
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         cpath, fpath, rpath = self.pairs[idx]
-        contour = Image.open(cpath).convert("RGB")
         flow = Image.open(fpath).convert("RGB")
-
-        input_t = self.base_transform(contour)
         target_t = self.base_transform(flow)
+
+        if self.elev_only:
+            # 등고선 PNG 는 아예 열지 않는다 (입력에 안 쓰이므로)
+            input_t = self._load_elev(os.path.basename(cpath), self.image_size)
+        else:
+            input_t = self.base_transform(Image.open(cpath).convert("RGB"))
+
+        if self.elev_dir is not None and not self.elev_only:
+            # 증강보다 먼저 붙인다 - 고도는 지형이라 등고선과 같이 뒤집혀야 한다
+            # (강우 채널은 공간 구조가 없어서 증강 뒤에 붙는 것과 대비된다).
+            input_t = torch.cat([input_t, self._load_elev(os.path.basename(cpath),
+                                                           input_t.shape[-1])], dim=0)
 
         rain_t = None
         if rpath is not None:

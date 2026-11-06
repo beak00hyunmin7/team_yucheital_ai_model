@@ -40,5 +40,12 @@ terrainFlowSim/ai_model/data_scalar/
 terrainFlowSim/webapp/run_windows.bat.bak
 *.bak
 
+# 샘플_등고선: OpenFOAM 시험 실행 로그(20MB, tqdm/mpi 출력)와 재생성 가능한 압축본
+샘플_등고선/*.zip
+샘플_등고선/sample_check/openfoam_result/batch_log.txt
+
+# 토큰 서명 키 (기기마다 자동 생성. 공유 금지)
+terrainFlowSim/webapp/.yuche_secret
+
 # 분석 기록 썸네일 (서버 실행 시 생성, 사용자 데이터)
 terrainFlowSim/webapp/data/
