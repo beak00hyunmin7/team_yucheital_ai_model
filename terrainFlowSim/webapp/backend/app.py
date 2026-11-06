@@ -70,6 +70,7 @@ from src.ground_truth import (  # noqa: E402
 from terrain_io import InvalidTerrainData, load_terrain  # noqa: E402
 from analysis_figure import intensity_from_prediction, render_analysis_figure  # noqa: E402
 import auth  # noqa: E402  (회원가입/로그인 + MySQL)
+import history  # noqa: E402  (분석 기록 저장: MySQL + 썸네일 파일). auth.init_db() 전에 import 해야 테이블이 같이 생성됨
 
 RAIN_MIN_MM, RAIN_MAX_MM = 20.0, 80.0          # 학습 데이터가 다룬 강우 범위
 TIME_MIN_S, TIME_MAX_S = 0.0, 120.0            # 학습 데이터가 다룬 경과 시간 범위
@@ -93,10 +94,11 @@ app = FastAPI(title="예측 배수맵 API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],   # 기록 이름변경/삭제(PATCH/DELETE) 허용
     allow_headers=["*"],
 )
 app.include_router(auth.router)
+app.include_router(history.router)
 auth.init_db()   # 기동 시 테이블 생성 시도. 실패해도 latch 하지 않는다 (auth.db_ready 주석 참조)
 
 
@@ -403,7 +405,18 @@ async def predict(
             drain = {
                 "pixel": {"x": int(c), "y": int(r)},
                 "normalized": {"x": round(c / max(w - 1, 1), 4), "y": round(r / max(h - 1, 1), 4)},
+                # 화면 그림(입력 등고선·예측·오버레이) 위 위치. 왼쪽 위 = (0, 0).
+                # 그림은 terrain 배열과 상하가 반대라서 y 를 뒤집는다.
+                "image": {"x": round(c / max(w - 1, 1), 4), "y": round(1 - r / max(h - 1, 1), 4)},
             }
+        else:
+            # 이미지 모드: 고도값이 없어 분석 지도는 못 그리지만, 예측 그림에서 유출이 가장
+            # 강한 점은 찾을 수 있다. 예측 그림은 입력 이미지와 같은 방향이라 뒤집기 보정이 필요 없다.
+            ph, pw = pred_img.height, pred_img.width
+            inten = intensity_from_prediction(pred_img, (ph, pw))
+            r, c = np.unravel_index(int(np.argmax(inten)), inten.shape)
+            pos = {"x": round(c / max(pw - 1, 1), 4), "y": round(r / max(ph - 1, 1), 4)}
+            drain = {"pixel": {"x": int(c), "y": int(r)}, "normalized": pos, "image": pos}
 
     except InvalidTerrainData as exc:
         raise HTTPException(422, str(exc)) from exc

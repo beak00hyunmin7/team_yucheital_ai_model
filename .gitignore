@@ -46,3 +46,6 @@ terrainFlowSim/webapp/run_windows.bat.bak
 
 # 토큰 서명 키 (기기마다 자동 생성. 공유 금지)
 terrainFlowSim/webapp/.yuche_secret
+
+# 분석 기록 썸네일 (서버 실행 시 생성, 사용자 데이터)
+terrainFlowSim/webapp/data/

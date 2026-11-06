@@ -42,6 +42,19 @@
 
 ## 빠르게 돌려보기
 
+### 모델 가중치 받기 (처음 한 번만)
+
+가중치는 용량 때문에 git 에 들어있지 않습니다. 릴리스에서 받아 지정 경로에 두세요.
+
+```powershell
+mkdir ".\terrainFlowSim\ai_model\checkpoints_p2_wet8" -Force
+curl.exe -L -o ".\terrainFlowSim\ai_model\checkpoints_p2_wet8\best.pt" "https://github.com/beak00hyunmin7/team_yucheital_ai_model/releases/download/weights-p2-wet8/best_p2_wet8.pt"
+```
+
+120 MB, sha256 `60f5fb66ad86ff6bacc2cfba2dcef10d7e22b0002d827354b401d283ddeabf3e`.
+다른 경로에 두려면 환경변수 `AI_MODEL_CHECKPOINT` 에 파일 경로를 주면 됩니다.
+추론 해상도는 체크포인트 구조에서 자동 판별하므로 설정을 바꿀 필요는 없습니다.
+
 ### 웹앱
 
 ```powershell
@@ -96,6 +109,7 @@ print(f"최대 침수 {depth_m.max():.3f} m")
 ```
 
 학습 데이터·체크포인트·로그는 `.gitignore` 로 제외됩니다 (수십 GB).
+배포 모델 가중치만 릴리스 [`weights-p2-wet8`](https://github.com/beak00hyunmin7/team_yucheital_ai_model/releases/tag/weights-p2-wet8) 에 올려뒀습니다.
 
 ---
 
