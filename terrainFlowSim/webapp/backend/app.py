@@ -67,6 +67,7 @@ from src.ground_truth import (  # noqa: E402
     split_of,
 )
 
+import contour_color as cc  # noqa: E402  (이미지 색 체계 -> 학습 형식 변환)
 from terrain_io import InvalidTerrainData, load_terrain  # noqa: E402
 from analysis_figure import intensity_from_prediction, render_analysis_figure  # noqa: E402
 import auth  # noqa: E402  (회원가입/로그인 + MySQL)
@@ -126,6 +127,16 @@ def health() -> dict:
         "auth_enabled": auth.db_ready(),
         "db": auth.db_status(),
         "db_error": auth.db_error() or None,
+    }
+
+
+@app.get("/api/color-schemes")
+def color_schemes() -> dict:
+    """등고선 이미지 색 체계 선택지 (낮음->높음 범례색 포함)."""
+    return {
+        "default": cc.AUTO,
+        "schemes": [{"key": k, "label": v[0], "legend": cc._legend(k, False)}
+                    for k, v in cc.SCHEMES.items()],
     }
 
 
@@ -335,6 +346,8 @@ async def predict(
     rain_mm: float = Form(50.0),
     time_s: float = Form(DEFAULT_TIME_S),
     dx: float = Form(DEFAULT_DX_M),
+    color_scheme: str = Form(cc.AUTO),
+    reverse: bool = Form(False),
     file: UploadFile = File(...),
     _user: str | None = Depends(_auth_gate),
 ) -> dict:
@@ -351,6 +364,8 @@ async def predict(
     rain_mm = float(np.clip(rain_mm, 0.0, 500.0))
     time_s = float(np.clip(time_s, TIME_MIN_S, TIME_MAX_S))
     meta: dict = {"mode": mode, "filename": file.filename}
+    color_info: dict | None = None
+    original_img: Image.Image | None = None
 
     try:
         if mode == "image":
@@ -359,6 +374,29 @@ async def predict(
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(422, f"이미지를 열 수 없습니다: {exc}") from exc
             meta["source_format"] = "contour_image"
+
+            # 모델은 색을 곧 높이로 읽는다. 학습 때 쓴 terrain 색 체계가 아니면 높낮이가
+            # 뒤집혀 나오므로, 색을 높이로 복원해 학습 형식으로 다시 그려서 넣는다.
+            try:
+                with _HEAVY_LOCK:
+                    conv = cc.convert_to_training_style(contour_img, color_scheme, reverse)
+            except cc.ColorSchemeError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            if conv.converted:
+                original_img = contour_img
+                contour_img = conv.image
+            color_info = {
+                "scheme": conv.scheme,
+                "label": cc.SCHEMES[conv.scheme][0],
+                "auto": conv.auto,
+                "reversed": conv.reversed,
+                "converted": conv.converted,
+                "match_frac": None if conv.match_frac is None else round(conv.match_frac, 3),
+                "legend": conv.legend,
+                "warnings": conv.warnings,
+            }
+            meta["color_scheme"] = conv.scheme
+            meta["color_reversed"] = conv.reversed
         else:
             terrain, tmeta = load_terrain(raw, file.filename or "upload")
             meta.update(tmeta)
@@ -427,6 +465,8 @@ async def predict(
 
     return {
         "contour_png_base64": _b64(contour_img),
+        "original_png_base64": _b64(original_img) if original_img is not None else None,
+        "color_info": color_info,
         "prediction_png_base64": _b64(pred_img),
         "overlay_png_base64": _b64(overlay_img),
         "analysis_png_base64": analysis_b64,
