@@ -19,6 +19,8 @@ import hmac
 import json
 import os
 import secrets
+import subprocess
+import sys
 import time
 
 import re
@@ -27,7 +29,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Column, DateTime, Integer, String, create_engine, func
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DB_URL = os.environ.get(
@@ -143,9 +145,56 @@ def db_error() -> str:
     return _last_error
 
 
+# --- DB 연결 자동 복구 -------------------------------------------------------
+# 회원가입이 "서버는 켜져 있지만 요청을 처리하다 오류" 로 실패하던 원인: 가입·로그인 세션은
+# 요청을 처리하는 도중에 처음 DB 연결을 여는데, 그 순간 Windows -> WSL 127.0.0.1:3306 포워딩이
+# 끊겨 있으면(WinError 10061) 아무 복구 없이 500 이 났다. /api/health 가 ok 인 직후에도 일어난다.
+# 이 포워딩은 Windows 에서 `wsl` 명령을 한 번 날리면 되살아나므로(run_windows.bat 의 유지용 루프와
+# 같은 원리), 연결에 실패하면 WSL 을 한 번 깨우고 다시 연결해 본다. 그래도 안 되면 500 이 아니라
+# 사람이 읽을 수 있는 503 으로 알린다.
+_WSL_DISTRO = os.environ.get("YUCHE_WSL_DISTRO", "Ubuntu-22.04")
+_POKE_COOLDOWN_S = 5.0
+_last_poke = 0.0
+
+
+def _poke_wsl() -> None:
+    """WSL 을 깨워 포워딩을 되살린다 (Windows 전용, 5초에 한 번만)."""
+    global _last_poke
+    if sys.platform != "win32" or time.time() - _last_poke < _POKE_COOLDOWN_S:
+        return
+    _last_poke = time.time()
+    try:
+        subprocess.run(["wsl", "-d", _WSL_DISTRO, "-u", "root", "--", "true"],
+                       timeout=20, capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:  # noqa: BLE001  (wsl 이 없거나 느려도 요청 자체는 아래에서 처리)
+        pass
+
+
+def connect_with_recovery(db: Session, attempts: int = 3) -> None:
+    """세션의 DB 연결을 지금 열고, 거부되면 WSL 을 깨워 몇 번 다시 시도한다."""
+    for i in range(attempts):
+        try:
+            db.connection()
+            return
+        except OperationalError:
+            db.rollback()
+            if i == attempts - 1:
+                break
+            if i == 0:
+                _poke_wsl()
+            time.sleep(1.0 * (i + 1))
+    raise HTTPException(
+        503,
+        "회원 DB(MariaDB)에 연결할 수 없습니다. WSL 이 꺼져 있거나 연결이 끊긴 상태예요. "
+        "잠시 후 다시 시도하고, 계속되면 서버를 run_windows.bat 로 다시 켜 주세요.",
+    )
+
+
 def _get_db():
     db = SessionLocal()
     try:
+        connect_with_recovery(db)
         yield db
     finally:
         db.close()
@@ -215,21 +264,28 @@ class Credentials(BaseModel):
 
 @router.post("/signup")
 def signup(body: Credentials, db: Session = Depends(_get_db)):
-    if not _EMAIL_RE.match(body.email.strip()):
+    # 공백을 뗀 이메일 하나로 검사·저장한다. 예전엔 조회는 원본, 저장은 strip() 본이라
+    # ' a@b.com' 으로 가입하면 중복 검사를 빠져나가 UNIQUE 위반(500)이 났다.
+    email = body.email.strip()
+    if not _EMAIL_RE.match(email):
         raise HTTPException(400, "이메일 형식이 올바르지 않습니다.")
     if len(body.password) < 6:
         raise HTTPException(400, "비밀번호는 6자 이상이어야 합니다.")
-    if db.query(User).filter(User.email == body.email).first():
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(409, "이미 가입된 이메일입니다.")
-    user = User(email=body.email.strip(), password_hash=hash_password(body.password))
+    user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:   # 같은 이메일로 동시에 가입한 경우
+        db.rollback()
+        raise HTTPException(409, "이미 가입된 이메일입니다.") from None
     return {"ok": True, "email": user.email, "token": make_token(user.email)}
 
 
 @router.post("/login")
 def login(body: Credentials, db: Session = Depends(_get_db)):
-    user = db.query(User).filter(User.email == body.email).first()
+    user = db.query(User).filter(User.email == body.email.strip()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다.")
     return {"ok": True, "email": user.email, "token": make_token(user.email)}

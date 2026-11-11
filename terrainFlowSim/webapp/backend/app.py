@@ -39,6 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
+from sqlalchemy.exc import OperationalError
 
 # --- ai_model 을 import 경로에 추가하고 기본 체크포인트를 FiLM 모델로 지정 --------
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -112,6 +113,14 @@ async def _unreadable_image(_request: Request, exc: cc.ColorSchemeError) -> JSON
     구분해 안내 화면(다음 행동 3가지)을 띄우게 한다.
     """
     return JSONResponse(status_code=422, content={"detail": str(exc), "code": "unreadable_image"})
+
+
+@app.exception_handler(OperationalError)
+async def _db_unavailable(_request: Request, _exc: OperationalError) -> JSONResponse:
+    """요청 도중 DB 연결이 끊겼을 때. 처리 안 된 예외(500)는 CORS 헤더 없이 나가서 브라우저가
+    '서버 오류'로만 보이므로, 이유를 알 수 있는 503 JSON 으로 바꿔 보낸다."""
+    return JSONResponse(status_code=503, content={
+        "detail": "DB 연결이 끊겼습니다. 잠시 후 다시 시도하세요. (WSL/MariaDB 확인)"})
 
 
 app.include_router(auth.router)

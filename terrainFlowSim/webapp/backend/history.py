@@ -38,7 +38,7 @@ from sqlalchemy import Column, DateTime, String, Text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from auth import Base, SessionLocal, require_user
+from auth import Base, SessionLocal, connect_with_recovery, require_user
 
 WEBAPP_DIR = Path(__file__).resolve().parent.parent
 HISTORY_DIR = Path(os.environ.get("YUCHE_HISTORY_DIR", WEBAPP_DIR / "data" / "history")).resolve()
@@ -89,6 +89,7 @@ class RenameIn(BaseModel):
 def _get_db():
     db = SessionLocal()
     try:
+        connect_with_recovery(db)   # 포워딩이 끊겨 있으면 WSL 을 깨워 다시 연결 (auth.py 참고)
         yield db
     except SQLAlchemyError as exc:
         db.rollback()
