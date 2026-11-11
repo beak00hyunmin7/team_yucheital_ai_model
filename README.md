@@ -55,28 +55,26 @@ curl.exe -L -o ".\terrainFlowSim\ai_model\checkpoints_p2_wet8\best.pt" "https://
 다른 경로에 두려면 환경변수 `AI_MODEL_CHECKPOINT` 에 파일 경로를 주면 됩니다.
 추론 해상도는 체크포인트 구조에서 자동 판별하므로 설정을 바꿀 필요는 없습니다.
 
-### 웹앱
+### 웹 서버 (이전됨)
 
-```powershell
-& ".\terrainFlowSim\webapp\run_windows.bat"
-```
+예측 웹 서버(FastAPI)는 **[team_yucheital_backend](https://github.com/beak00hyunmin7/team_yucheital_backend)
+의 `prediction_server/`** 로 옮겼습니다 (2026-11-11, AI / 백엔드 / 프런트 담당 경계 정리).
+그쪽이 이 저장소를 **서브모듈**(`prediction_server/ai`)로 가져다 쓰고, 어떤 AI 버전을 쓰는지는 서브모듈 커밋으로 고정됩니다.
+AI 모델 코드를 바꾸면 그쪽에서 서브모듈 커밋을 올리면 됩니다.
 
-`http://127.0.0.1:8000` 접속. 두 개의 탭이 있습니다.
+- 서버 설치·실행: `team_yucheital_backend/prediction_server/README.md`
+- 정식 화면: [team_yucheital_frontend](https://github.com/beak00hyunmin7/team_yucheital_frontend)
+- 정답 비교 탭이 있는 개발·검증용 화면: 서버를 켠 뒤 `http://127.0.0.1:8000`
+  (`prediction_server/frontend/index.html`). `학습 안 쓴 지형(val)` / `학습에 쓴 지형(train)` 토글로 데이터 누출 영향을 대조할 수 있습니다
+- 테스트용 지형 파일 만들기: `prediction_server/make_test_input.py`
 
-- **예측** — 등고선 이미지나 고도 격자를 올리고 강우량·경과시간을 정해 예측.
-  `시점 애니메이션`을 누르면 0~120초를 7프레임으로 훑어 물이 차올랐다 빠지는 과정을 재생합니다
-- **검증** — 예측을 OpenFOAM 정답과 나란히 놓고 수치까지 냅니다.
-  `학습 안 쓴 지형(val)` / `학습에 쓴 지형(train)` 토글로 데이터 누출 영향을 직접 대조할 수 있습니다
+> **서버가 이 저장소에서 가져다 쓰는 것**: `terrainFlowSim/ai_model/src/inference_api.py`,
+> `src/ground_truth.py`, `src/utils/render_fields.py`, `scripts/prepare_openfoam_dataset.py` 등
+> (`src.` 로 import). **이 경로·함수 이름·반환 형식을 바꿀 때는 서버 담당자에게 알려 주세요.**
 
 > **경과 시간 주의**: 학습 데이터는 비가 초반에 내리고 이후 빠지는 시뮬레이션이라
 > **시간이 짧을수록 물이 많습니다**. 정답 평균 수심이 t=18초 0.039 m → t=120초 0.019 m 로
 > 줄어듭니다. "이 지형이 얼마나 잠기나"를 묻는 조회의 기본값은 18초입니다.
-
-테스트용 지형 파일은 이 명령으로 만듭니다.
-
-```powershell
-& ".\terrainFlowSim\ai_model\.venv\Scripts\python.exe" ".\terrainFlowSim\webapp\make_test_input.py"
-```
 
 ### 파이썬에서 직접
 
@@ -105,7 +103,7 @@ print(f"최대 침수 {depth_m.max():.3f} m")
     │   ├── configs/                        학습 설정 (YAML)
     │   ├── deploy_package/                 백엔드 전달용 추론 전용 패키지
     │   └── IMPROVEMENT_GUIDE.md            검증·개선 경과 (읽을 가치 있음)
-    └── webapp/                             FastAPI 백엔드 + 단일 페이지 프런트
+    (웹 서버는 team_yucheital_backend/prediction_server 로 이전했습니다)
 ```
 
 학습 데이터·체크포인트·로그는 `.gitignore` 로 제외됩니다 (수십 GB).
@@ -167,7 +165,7 @@ train과 val에 나뉘어 들어가지 않습니다.
 - **`predict_depth_*` 반환 배열이 입력 지형 대비 상하반전입니다.** matplotlib의
   `contourf`(Y축이 위로 증가)와 `imshow(origin="lower")`를 거치면서 생깁니다. 학습에는 입력과
   타깃이 같이 뒤집혀 지장이 없지만, API를 직접 쓰면 틀린 방향의 지도를 받습니다.
-  현재 `webapp/backend/app.py` 와 `scripts/visualize_inference.py` 가 각자 `np.flipud` 로
+  현재 서버(`team_yucheital_backend/prediction_server/backend/app.py`)와 `scripts/visualize_inference.py` 가 각자 `np.flipud` 로
   보정하고 있습니다. API 자체를 고치려면 이 두 곳을 같이 손봐야 합니다
 - **최대 수심 과소예측** (정답의 62%). 균등 L1이 얇은 배수채널을 뭉개는 쪽을 선호하기 때문이며,
   젖은 픽셀 가중 L1으로 0.49 → 0.62까지 회수했지만 `wet_weight=8`에서 포화합니다
