@@ -199,17 +199,28 @@ $env:AI_MODEL_CHECKPOINT = "C:\...\ai_model\checkpoints_gan\best.pt"   # 후 재
 
 ## 응답 (`POST /api/predict`, multipart)
 
-폼 필드: `mode`(image|terrain), `rain_mm`, `dx`(terrain 전용), `file`
+폼 필드: `mode`(image|terrain), `rain_mm`, `time_s`, `dx`(terrain 전용), `color_scheme`·`reverse`(image 전용, 위 "이미지 색 체계" 참고), `file`
 
 ```json
 {
-  "contour_png_base64":   "…",   // 실제로 모델에 들어간 등고선
+  "contour_png_base64":   "…",   // 실제로 모델에 들어간 등고선 (색 체계를 변환했으면 변환본)
+  "original_png_base64":  "…",   // 색 체계를 변환했을 때 올린 원본 (아니면 null)
+  "color_info":           { "scheme": "gray", "converted": true, "reversed": false, "legend": ["#000000", "…"], "warnings": [] },
   "prediction_png_base64":"…",   // 예측 배수맵
   "overlay_png_base64":   "…",   // 등고선 + 예측 겹침
+  "analysis_png_base64":  "…",   // terrain 모드: 제목·컬러바가 있는 분석 지도
+  "map_jpg_base64":       "…",   // terrain 모드: 제목·컬러바·별표 없는 정사각 지도(JPEG). 웹 화면이 꽉 채워 쓰고 배수구 후보는 HTML 로 얹는다
+  "stats": { "max_depth_cm": 27.3, "wet_area_pct": 20.3, "wet_threshold_cm": 5.0 },   // 지도 위 요약 칩
+  "drain_candidate": { "pixel": {…}, "normalized": {…}, "image": { "x": 0.61, "y": 0.35 } },
   "checkpoint": "best.pt",
   "meta": { "mode": "...", "grid_shape": [...], "rain_mm": 45.0, ... }
 }
 ```
+
+- `stats` 는 예측 그림을 수심[m]으로 되돌려(`depth_from_prediction_image`) 잰다. 이미지 모드는 격자 정보가 없어
+  학습 격자(96×96)로 환산하므로 **면적 비율만 의미**가 있고 깊이는 참고용이다.
+- 색에서 높이를 읽을 수 없는 이미지(지형도·스캔 도면)는 `422 { "detail": "…", "code": "unreadable_image" }`.
+  프런트는 `code` 로 일반 422(파일 형식 오류 등)와 구분해 다음 행동 안내 화면을 띄운다.
 
 ## 한계
 

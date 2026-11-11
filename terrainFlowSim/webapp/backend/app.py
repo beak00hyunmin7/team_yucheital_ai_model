@@ -36,7 +36,8 @@ from pathlib import Path
 import numpy as np
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.requests import Request
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 
 # --- ai_model 을 import 경로에 추가하고 기본 체크포인트를 FiLM 모델로 지정 --------
@@ -69,7 +70,11 @@ from src.ground_truth import (  # noqa: E402
 
 import contour_color as cc  # noqa: E402  (이미지 색 체계 -> 학습 형식 변환)
 from terrain_io import InvalidTerrainData, load_terrain  # noqa: E402
-from analysis_figure import intensity_from_prediction, render_analysis_figure  # noqa: E402
+from analysis_figure import (  # noqa: E402
+    intensity_from_prediction,
+    render_analysis_figure,
+    render_map_only,
+)
 import auth  # noqa: E402  (회원가입/로그인 + MySQL)
 import history  # noqa: E402  (분석 기록 저장: MySQL + 썸네일 파일). auth.init_db() 전에 import 해야 테이블이 같이 생성됨
 
@@ -85,6 +90,7 @@ TIME_MIN_S, TIME_MAX_S = 0.0, 120.0            # 학습 데이터가 다룬 경�
 # 기본값은 가장 심한 시점 쪽인 18s 로 둔다.
 DEFAULT_TIME_S = 18.0
 DEFAULT_DX_M = 10.4166667                       # 1000m / 96격자
+WET_THRESHOLD_M = 0.05                          # '침수'로 세는 최소 수심 (5cm). 평가 지표 IoU@5cm 와 같은 기준
 SAMPLES_DIR = AI_MODEL_DIR / "data" / "contours"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
@@ -98,6 +104,16 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],   # 기록 이름변경/삭제(PATCH/DELETE) 허용
     allow_headers=["*"],
 )
+@app.exception_handler(cc.ColorSchemeError)
+async def _unreadable_image(_request: Request, exc: cc.ColorSchemeError) -> JSONResponse:
+    """색에서 높이를 읽을 수 없는 이미지(지형도·스캔 도면 등).
+
+    detail 은 기존 오류들과 같은 문자열이고, code 를 덧붙여 프런트가 일반 422(파일 형식 오류 등)와
+    구분해 안내 화면(다음 행동 3가지)을 띄우게 한다.
+    """
+    return JSONResponse(status_code=422, content={"detail": str(exc), "code": "unreadable_image"})
+
+
 app.include_router(auth.router)
 app.include_router(history.router)
 auth.init_db()   # 기동 시 테이블 생성 시도. 실패해도 latch 하지 않는다 (auth.db_ready 주석 참조)
@@ -377,11 +393,8 @@ async def predict(
 
             # 모델은 색을 곧 높이로 읽는다. 학습 때 쓴 terrain 색 체계가 아니면 높낮이가
             # 뒤집혀 나오므로, 색을 높이로 복원해 학습 형식으로 다시 그려서 넣는다.
-            try:
-                with _HEAVY_LOCK:
-                    conv = cc.convert_to_training_style(contour_img, color_scheme, reverse)
-            except cc.ColorSchemeError as exc:
-                raise HTTPException(422, str(exc)) from exc
+            with _HEAVY_LOCK:   # ColorSchemeError 는 위 핸들러가 code=unreadable_image 로 422 응답
+                conv = cc.convert_to_training_style(contour_img, color_scheme, reverse)
             if conv.converted:
                 original_img = contour_img
                 contour_img = conv.image
@@ -422,6 +435,7 @@ async def predict(
 
         # 등고선 데이터 모드에서만: 실제 등고선(m) + 음영기복 + 축척 + 배수구 후보 지도
         analysis_b64 = None
+        map_b64 = None
         drain = None
         if mode == "terrain":
             with _HEAVY_LOCK:
@@ -439,6 +453,8 @@ async def predict(
                     mark_idx=(int(r), int(c)),
                 )
             analysis_b64 = base64.b64encode(png).decode("ascii")
+            with _HEAVY_LOCK:
+                map_b64 = base64.b64encode(render_map_only(terrain, inten)).decode("ascii")
             h, w = terrain.shape
             drain = {
                 "pixel": {"x": int(c), "y": int(r)},
@@ -456,9 +472,19 @@ async def predict(
             pos = {"x": round(c / max(pw - 1, 1), 4), "y": round(r / max(ph - 1, 1), 4)}
             drain = {"pixel": {"x": int(c), "y": int(r)}, "normalized": pos, "image": pos}
 
+        # 지도 위 요약 숫자. 예측 그림을 수심[m]으로 되돌려(학습 때 쓴 Blues 역변환) 잰다.
+        # 이미지 모드는 격자 정보가 없어 학습 격자(96x96)로 환산하므로 면적 비율만 의미가 있다.
+        depth_grid = depth_from_prediction_image(
+            pred_img, terrain.shape if mode == "terrain" else (96, 96))
+        stats = {
+            "max_depth_cm": round(float(depth_grid.max()) * 100.0, 1),
+            "wet_area_pct": round(float((depth_grid > WET_THRESHOLD_M).mean()) * 100.0, 1),
+            "wet_threshold_cm": WET_THRESHOLD_M * 100.0,
+        }
+
     except InvalidTerrainData as exc:
         raise HTTPException(422, str(exc)) from exc
-    except HTTPException:
+    except (HTTPException, cc.ColorSchemeError):
         raise
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -470,6 +496,8 @@ async def predict(
         "prediction_png_base64": _b64(pred_img),
         "overlay_png_base64": _b64(overlay_img),
         "analysis_png_base64": analysis_b64,
+        "map_jpg_base64": map_b64,
+        "stats": stats,
         "drain_candidate": drain,
         "checkpoint": os.path.basename(str(current_checkpoint())),
         "meta": meta,

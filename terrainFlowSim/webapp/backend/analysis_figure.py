@@ -107,6 +107,35 @@ def render_analysis_figure(
     return buf.getvalue()
 
 
+def render_map_only(terrain: np.ndarray, intensity: np.ndarray, size: int = 900) -> bytes:
+    """제목·컬러바·축척·별표 없이 음영기복 + 침수 강도 + 등고선(m 라벨)만 그린 정사각 지도(JPEG).
+
+    웹 화면이 지도를 꽉 채워 보여주고 배수구 후보 표시·범례·축척은 HTML 로 얹기 위한 용도다.
+    별표를 그림에 굽지 않아야 화면의 빨간 원(비율 좌표)과 겹치지 않는다.
+    """
+    bg = _up(intensity.astype(float))
+    terr = _up(terrain.astype(float))
+    fig = plt.figure(figsize=(7.5, 7.5), dpi=size / 7.5)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ls = LightSource(azdeg=315, altdeg=45)
+    ax.imshow(ls.hillshade(terr, vert_exag=1.5), origin="lower", cmap="gray",
+              vmin=0.55, vmax=1.0, zorder=0)
+    norm = PowerNorm(gamma=0.6, vmin=0.0, vmax=max(float(bg.max()), 1e-6))
+    ax.imshow(bg, origin="lower", cmap="Blues", norm=norm, alpha=0.92,
+              interpolation="bilinear", zorder=1)
+    lo, hi = float(np.percentile(terr, 2)), float(np.percentile(terr, 98))
+    cs = ax.contour(terr, levels=np.linspace(lo, hi, 11), colors="#3a3a3a", linewidths=0.7,
+                    alpha=0.85, origin="lower", zorder=2)
+    ax.clabel(cs, cs.levels[::2], inline=True, fontsize=7, fmt="%.0fm")
+    ax.axis("off")
+    ax.set_xlim(0, bg.shape[1])
+    ax.set_ylim(0, bg.shape[0])
+    buf = io.BytesIO()
+    fig.savefig(buf, format="jpeg", dpi=size / 7.5, pil_kwargs={"quality": 86})
+    plt.close(fig)
+    return buf.getvalue()
+
+
 def intensity_from_prediction(pred_img, out_shape: tuple[int, int]) -> np.ndarray:
     """예측 배수맵 PIL 이미지 -> (H, W) 상대 침수 강도 (255 - 밝기평균, 클수록 위험)."""
     from PIL import Image
