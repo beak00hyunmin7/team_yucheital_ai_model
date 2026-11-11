@@ -103,7 +103,7 @@ WSL/PC 를 재시작하면 `service mariadb start` 를 다시 해야 함 (run_wi
 대책 두 가지를 같이 넣었다.
 
 1. `run_windows.bat` 이 서버가 도는 동안 **Windows 쪽에서 45 초마다 `wsl ... true` 를 날리는
-   심장박동 루프**를 띄운다 (`yuche-wsl-keepalive` 창, 서버 종료 시 `taskkill` 로 정리).
+   WSL 유지용 루프**를 띄운다 (`yuche-wsl-keepalive` 창, 서버 종료 시 `taskkill` 로 정리).
    처음에는 WSL 안쪽에 `sleep infinity` 를 띄우는 방식이었는데, 그것만으로는 부족하다 —
    VM 과 mariadb 가 멀쩡히 살아 있는데도 Windows → WSL 의 `127.0.0.1:3306` **포워딩이
    따로 끊기는** 두 번째 고장 모드가 있다 (2026-11-05 재현). Windows 에서 `wsl` 명령을
@@ -112,6 +112,18 @@ WSL/PC 를 재시작하면 `service mariadb start` 를 다시 해야 함 (run_wi
    판정을 상수로 들고 있으면, 기동 때 DB 가 꺼져 있었다는 이유만으로 그 뒤 DB 가 살아나도
    프로세스가 죽을 때까지 인증이 비활성으로 고정된다. 실제로 그 상태로 서버가 떠서
    회원가입·로그인이 조용히 죽어 있었다.
+
+3. **요청 도중 연결이 거부돼도 복구한다 (2026-11-11)**. 위 두 가지로도 `/api/health` 가 ok 인
+   바로 다음 가입 요청이 `WinError 10061` 로 실패해 **500 → 화면에 "서버는 켜져 있지만 요청을
+   처리하다 오류"** 가 뜨는 일이 있었다(가입·로그인 세션은 요청 처리 중에 처음 연결을 연다).
+   `auth.connect_with_recovery()` 가 연결 실패 시 **WSL 을 한 번 깨우고(`wsl ... true`) 최대 3번
+   다시 연결**한다. 그래도 안 되면 500 이 아니라 안내 문구가 있는 **503** 을 준다. 가입·로그인·
+   기록 API 가 같은 함수를 쓰고, 요청 도중 끊기는 `OperationalError` 도 앱 핸들러가 503 JSON 으로
+   바꿔 보낸다(처리 안 된 500 은 CORS 헤더 없이 나가서 브라우저가 이유를 못 읽는다).
+   같은 경로의 다른 버그도 고쳤다: 이메일 앞뒤 공백이 있으면 중복 검사(원본 비교)는 통과하고
+   저장(strip)에서 UNIQUE 위반 500 이 나던 문제 → 공백을 뗀 값 하나로 검사·저장하고, 동시 가입의
+   `IntegrityError` 는 409 로 바꿨다. 복구 대상 WSL 배포판 이름은 `YUCHE_WSL_DISTRO`(기본
+   `Ubuntu-22.04`).
 
 `/api/health` 의 `db_error` 로 끊긴 이유를 바로 확인할 수 있다 (예전에는 예외를 통째로
 버려서 "down" 말고는 알 수 있는 게 없었다).
@@ -130,8 +142,39 @@ WSL/PC 를 재시작하면 `service mariadb start` 를 다시 해야 함 (run_wi
 
 | 방식 | 보내는 것 | 서버 처리 | 언제 |
 |---|---|---|---|
-| **등고선 이미지** | PNG/JPG 등 | 그대로 모델 입력 | 이미 matplotlib `terrain` 스타일로 렌더된 등고선이 있을 때 |
+| **등고선 이미지** | PNG/JPG 등 | `terrain` 색 체계면 그대로, 아니면 색을 높이로 복원해 `terrain` 으로 다시 그려 모델 입력 (아래) | 등고선 이미지만 있을 때 |
 | **등고선 데이터** | 고도 격자 파일 | 학습과 동일한 `render_contour_rgb` 로 등고선 이미지를 만든 뒤 모델 입력 | 원본 DEM/격자를 가지고 있을 때 (스타일 불일치가 없어 더 정확) |
+
+### 이미지 색 체계와 높낮이 반전 (`contour_color.py`)
+
+모델은 **색을 곧 높이**로 읽는다(학습 형식: 파랑=낮음 → 흰색=높음). 회색조·viridis·jet 처럼
+다른 색 체계나 거꾸로 칠한 이미지를 그대로 넣으면 높낮이가 뒤집혀 예측된다.
+그래서 화면에서 **색 체계**(자동 감지 / terrain·회색조·viridis·jet·gist_earth·rainbow·turbo·cividis)와
+**높낮이 반대로 해석** 체크를 고르게 하고, 서버가 색→높이(0~1)를 복원해 `render_contour_rgb` 로
+학습 형식으로 다시 그린다. 결과 화면에 원본·변환본·해석한 색 범례를 같이 보여준다.
+
+- 자동 감지는 **컬러맵 종류**만 찾는다. 회색조나 거꾸로 칠한 지도는 색만으로 방향을 알 수 없어
+  기본을 "밝을수록 높음"으로 가정하고 경고를 띄운다 → 반대면 체크박스.
+- 이미 `terrain` 체계면 원본을 건드리지 않는다(학습 샘플 300장 중 오인 0건).
+- **일반 지형도·토지피복도는 거부한다(자동 감지일 때 422).** 색이 높이가 아니라 숲·시가지·물 같은
+  지물을 뜻하는 이미지(예: USGS 지형도)는 색이 우연히 `terrain` 과 94% 맞아도 높이를 읽을 수 없어
+  예측이 의미 없는 얼룩이 된다. 색→높이로 읽은 값이 이웃끼리 튀는 비율(`_roughness`)로 판별한다:
+  학습 형식 ≤0.028(JPEG70·확대해도 ≤0.016), 그 지형도 0.16. 기준 0.07. 색 체계를 직접 고른
+  경우는 막지 않고 경고만 띄운다. 이런 지도는 DEM(고도 격자)을 '등고선 데이터' 모드로 올려야 한다.
+- 검증(고도 격자 10개, 학습 형식 입력 예측과의 상관): 변환 전 회색조 0.53·jet 0.74·viridis 0.61·
+  거꾸로 jet 0.31 → 변환 후 0.95~0.97.
+- **무지개 색상(hue) 읽기**: 음영기복이 겹쳐 밝기가 변한 무지개색 지도(NOAA 수심도 등)는 RGB 최근접
+  매칭이 23~36% 밖에 못 맞춘다. 이때는 색상(파랑=낮음→빨강=높음)으로 읽는 `hue` 체계로 한 번 더 본다
+  (색 있는 픽셀 ≥50% · 색상이 넓게 퍼짐 · 이웃이 매끈할 때만 인정). 직접 고를 수도 있다.
+- **어떤 색 체계와도 75% 미만으로 맞으면 거부(자동 감지일 때 422).** 예전엔 경고만 띄우고 `terrain`
+  으로 가정해 통과시켜서 스캔 도면·3D 투시도·토지피복 지도도 말없이 얼룩 예측이 나왔다
+  (기준: 학습 샘플·JPEG 최소 0.87, 합성 컬러맵 최소 0.84).
+- **인터넷 예시 8장 실측 (Wikimedia Commons, 퍼블릭 도메인)**: 쓸 수 있는 입력은 2장뿐이었다 —
+  회색조 높이맵(밝을수록 높음, 정상 변환·예측)과 무지개색 수심도(hue 로 변환). 지형도·스캔
+  도면·3D 투시도 4장은 거부. 음영기복(hillshade)과 흑백 등고선 선 도면은 회색조라 거부하지 못해
+  경고만 띄운다(밝기가 높이가 아니라 빛·선이라 예측이 의미 없음) → DEM 을 쓸 것.
+- API: `POST /api/predict` 에 `color_scheme`(기본 `auto`), `reverse`(기본 `false`) 추가, 응답에
+  `color_info`·`original_png_base64`. 선택지는 `GET /api/color-schemes`.
 
 '등고선 데이터' 지원 포맷 (`terrain_io.py` `_PARSERS`):
 `.npy` · `.csv` `.txt` `.dat` (숫자 격자) · `.asc` `.grd` (ESRI ASCII Grid, cellsize 자동 인식) ·
@@ -168,17 +211,28 @@ $env:AI_MODEL_CHECKPOINT = "C:\...\ai_model\checkpoints_gan\best.pt"   # 후 재
 
 ## 응답 (`POST /api/predict`, multipart)
 
-폼 필드: `mode`(image|terrain), `rain_mm`, `dx`(terrain 전용), `file`
+폼 필드: `mode`(image|terrain), `rain_mm`, `time_s`, `dx`(terrain 전용), `color_scheme`·`reverse`(image 전용, 위 "이미지 색 체계" 참고), `file`
 
 ```json
 {
-  "contour_png_base64":   "…",   // 실제로 모델에 들어간 등고선
+  "contour_png_base64":   "…",   // 실제로 모델에 들어간 등고선 (색 체계를 변환했으면 변환본)
+  "original_png_base64":  "…",   // 색 체계를 변환했을 때 올린 원본 (아니면 null)
+  "color_info":           { "scheme": "gray", "converted": true, "reversed": false, "legend": ["#000000", "…"], "warnings": [] },
   "prediction_png_base64":"…",   // 예측 배수맵
   "overlay_png_base64":   "…",   // 등고선 + 예측 겹침
+  "analysis_png_base64":  "…",   // terrain 모드: 제목·컬러바가 있는 분석 지도
+  "map_jpg_base64":       "…",   // terrain 모드: 제목·컬러바·별표 없는 정사각 지도(JPEG). 웹 화면이 꽉 채워 쓰고 배수구 후보는 HTML 로 얹는다
+  "stats": { "max_depth_cm": 27.3, "wet_area_pct": 20.3, "wet_threshold_cm": 5.0 },   // 지도 위 요약 칩
+  "drain_candidate": { "pixel": {…}, "normalized": {…}, "image": { "x": 0.61, "y": 0.35 } },
   "checkpoint": "best.pt",
   "meta": { "mode": "...", "grid_shape": [...], "rain_mm": 45.0, ... }
 }
 ```
+
+- `stats` 는 예측 그림을 수심[m]으로 되돌려(`depth_from_prediction_image`) 잰다. 이미지 모드는 격자 정보가 없어
+  학습 격자(96×96)로 환산하므로 **면적 비율만 의미**가 있고 깊이는 참고용이다.
+- 색에서 높이를 읽을 수 없는 이미지(지형도·스캔 도면)는 `422 { "detail": "…", "code": "unreadable_image" }`.
+  프런트는 `code` 로 일반 422(파일 형식 오류 등)와 구분해 다음 행동 안내 화면을 띄운다.
 
 ## 한계
 

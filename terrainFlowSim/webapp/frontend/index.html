@@ -45,6 +45,10 @@
     border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 13px;
   }
   .hint { font-size: 12px; color: var(--muted); margin-top: 7px; }
+  select {
+    padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; color: var(--text); font-size: 13px;
+  }
 
   .rain-row { display: flex; align-items: center; gap: 14px; }
   input[type=range] { flex: 1; accent-color: var(--accent); }
@@ -176,6 +180,25 @@
       <div class="hint" id="fileHint"></div>
     </div>
 
+    <div class="field" id="colorField">
+      <label class="lbl" for="colorScheme">이미지 색 체계 (높이를 나타내는 색)</label>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <select id="colorScheme"></select>
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="colorReverse" /> 높낮이 반대로 해석
+        </label>
+      </div>
+      <div id="colorLegendRow" style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--muted)">
+        <span>낮음</span><div id="colorLegend" style="flex:0 0 220px;height:12px;border-radius:6px;border:1px solid var(--line)"></div><span>높음</span>
+      </div>
+      <div class="hint">
+        모델은 <b>색을 곧 높이</b>로 읽습니다(학습 형식: 파랑=낮음 → 흰색=높음). 다른 색 체계의 이미지는
+        서버가 이 범례대로 높이를 복원해 학습 형식으로 다시 그려서 예측합니다.
+        <b>자동</b>은 알려진 컬러맵을 색으로 찾지만, 회색조나 거꾸로 칠한 지도는 색만으로 방향을 알 수 없으니
+        결과의 높낮이가 반대로 보이면 <b>높낮이 반대로 해석</b>을 켜세요.
+      </div>
+    </div>
+
     <div class="field" id="dxField" style="display:none">
       <label class="lbl">격자 셀 크기 dx [m] — 등고선 데이터에 해상도 정보가 없을 때만 사용</label>
       <input type="number" id="dx" value="10.4166667" step="0.1" min="0.01" />
@@ -241,9 +264,14 @@
     <p id="rawHeading" style="font-size:12px;color:var(--muted);margin:0 0 10px;display:none">
       아래는 같은 예측의 모델 원본 출력입니다 (256px, 후처리 전).
     </p>
+    <div id="colorNote" style="display:none;margin:0 0 14px;padding:10px 12px;background:var(--panel-2);border-radius:10px;font-size:12px;color:var(--muted)"></div>
     <div class="results">
+      <figure id="origFig" style="display:none">
+        <figcaption>올린 원본 이미지</figcaption>
+        <img id="imgOrig" alt="" />
+      </figure>
       <figure>
-        <figcaption>입력 등고선 (모델에 들어간 이미지)</figcaption>
+        <figcaption id="contourCap">입력 등고선 (모델에 들어간 이미지)</figcaption>
         <img id="imgContour" alt="" />
         <a id="dlContour" download="contour.png">PNG 저장</a>
       </figure>
@@ -417,7 +445,35 @@ function applyMode() {
   $("file").setAttribute("accept", t.accept);
   $("dxField").style.display = mode === "terrain" ? "" : "none";
   $("sampleField").style.display = mode === "image" ? "" : "none";
+  $("colorField").style.display = mode === "image" ? "" : "none";
 }
+
+// 이미지 색 체계 선택 + 범례 미리보기
+let colorSchemes = {};
+function paintLegend(colors) {
+  $("colorLegend").style.background = colors && colors.length
+    ? `linear-gradient(to right, ${colors.join(",")})` : "var(--panel-2)";
+}
+function refreshLegend() {
+  const key = $("colorScheme").value;
+  const s = colorSchemes[key];
+  if (!s) { paintLegend(null); $("colorLegendRow").style.visibility = "hidden"; return; }
+  $("colorLegendRow").style.visibility = "";
+  paintLegend($("colorReverse").checked ? [...s.legend].reverse() : s.legend);
+}
+fetch(API + "/api/color-schemes").then((r) => r.json()).then((d) => {
+  const sel = $("colorScheme");
+  sel.innerHTML = '<option value="auto">자동 감지 (권장)</option>';
+  d.schemes.forEach((s) => {
+    colorSchemes[s.key] = s;
+    const o = document.createElement("option");
+    o.value = s.key; o.textContent = s.label;
+    sel.appendChild(o);
+  });
+  refreshLegend();
+}).catch(() => {});
+$("colorScheme").addEventListener("change", refreshLegend);
+$("colorReverse").addEventListener("change", refreshLegend);
 
 $("modeSeg").addEventListener("click", (e) => {
   const btn = e.target.closest("button");
@@ -506,6 +562,10 @@ async function callPredict(upload, timeS) {
   fd.append("rain_mm", $("rainNum").value);
   fd.append("time_s", timeS != null ? timeS : $("timeNum").value);
   fd.append("dx", $("dx").value);
+  if (mode === "image") {
+    fd.append("color_scheme", $("colorScheme").value || "auto");
+    fd.append("reverse", $("colorReverse").checked ? "true" : "false");
+  }
   fd.append("file", upload);
 
   const headers = tok.get() ? { Authorization: "Bearer " + tok.get() } : {};
@@ -526,6 +586,27 @@ async function callPredict(upload, timeS) {
     throw new Error(`[HTTP ${res.status}] ${d || res.statusText}`);
   }
   return data;
+}
+
+/** 서버가 색 체계를 어떻게 해석했는지 보여준다 (높낮이가 뒤집혔는지 사용자가 바로 확인). */
+function showColorInfo(data) {
+  const ci = data.color_info, box = $("colorNote");
+  const conv = !!(ci && ci.converted);
+  $("origFig").style.display = conv ? "" : "none";
+  if (conv) $("imgOrig").src = "data:image/png;base64," + data.original_png_base64;
+  $("contourCap").textContent = conv
+    ? "학습 형식으로 변환한 등고선 (모델에 들어간 이미지)"
+    : "입력 등고선 (모델에 들어간 이미지)";
+  if (!ci) { box.style.display = "none"; return; }
+  const colors = ci.reversed ? [...ci.legend].reverse() : ci.legend;
+  const strip = `<span style="display:inline-block;width:120px;height:10px;vertical-align:middle;border-radius:5px;border:1px solid var(--line);background:linear-gradient(to right,${colors.join(",")})"></span>`;
+  const how = ci.auto ? "자동 감지" : "직접 선택";
+  const rev = ci.reversed ? " · 높낮이 반전" : "";
+  const warn = (ci.warnings || []).map((w) => `<div style="color:#fbbf24;margin-top:6px">⚠ ${w}</div>`).join("");
+  box.innerHTML = `<b style="color:var(--text)">색 해석</b> (${how}): ${ci.label}${rev}
+    — 낮음 ${strip} 높음${conv ? " · 이 해석대로 높이를 복원해 학습 형식으로 변환했습니다." : " · 학습 형식이라 그대로 사용했습니다."}
+    <div style="margin-top:6px">결과의 높낮이가 반대로 보이면 위 '높낮이 반대로 해석'을 켜고 다시 실행하세요.</div>${warn}`;
+  box.style.display = "";
 }
 
 $("run").addEventListener("click", async () => {
@@ -550,6 +631,7 @@ $("run").addEventListener("click", async () => {
       $(imgId).src = url; $(dlId).href = url;
     };
     set("imgContour", "dlContour", data.contour_png_base64);
+    showColorInfo(data);
     set("imgPred", "dlPred", data.prediction_png_base64);
     set("imgOverlay", "dlOverlay", data.overlay_png_base64);
 
