@@ -46,6 +46,12 @@ BACKEND_DIR = Path(__file__).resolve().parent
 WEBAPP_DIR = BACKEND_DIR.parent
 AI_MODEL_DIR = WEBAPP_DIR.parent / "ai_model"
 FRONTEND_DIR = WEBAPP_DIR / "frontend"
+# 팀 프론트엔드(vtkjs.html + style.css) 폴더. 지정하면 이 서버가 화면까지 같이 내준다
+# -> 같은 공유기의 다른 PC 는 http://<이 PC IP>:8000 하나만 열면 된다 (Live Server 불필요).
+_site_env = os.environ.get("YUCHE_SITE_DIR", "").strip()
+SITE_DIR = Path(_site_env).resolve() if _site_env else None
+if SITE_DIR is not None and not (SITE_DIR / "vtkjs.html").is_file():
+    SITE_DIR = None
 
 sys.path.insert(0, str(AI_MODEL_DIR))
 os.environ.setdefault(
@@ -131,9 +137,34 @@ auth.init_db()   # 기동 시 테이블 생성 시도. 실패해도 latch 하지
 # --------------------------------------------------------------------------- #
 # 라우트
 # --------------------------------------------------------------------------- #
+_NO_CACHE = {"Cache-Control": "no-cache"}   # 화면 파일을 고치면 새로고침만으로 반영되게
+
+
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
+    if SITE_DIR is not None:
+        return FileResponse(SITE_DIR / "vtkjs.html", headers=_NO_CACHE)
     return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/test", include_in_schema=False)
+def legacy_index() -> FileResponse:
+    """AI 저장소에 들어 있는 간단한 테스트 화면."""
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/vtkjs.html", include_in_schema=False)
+def site_page() -> FileResponse:
+    if SITE_DIR is None:
+        raise HTTPException(404, "YUCHE_SITE_DIR 이 지정되지 않았습니다.")
+    return FileResponse(SITE_DIR / "vtkjs.html", headers=_NO_CACHE)
+
+
+@app.get("/style.css", include_in_schema=False)
+def site_css() -> FileResponse:
+    if SITE_DIR is None or not (SITE_DIR / "style.css").is_file():
+        raise HTTPException(404, "style.css 를 찾을 수 없습니다.")
+    return FileResponse(SITE_DIR / "style.css", media_type="text/css", headers=_NO_CACHE)
 
 
 @app.get("/api/health")
@@ -453,12 +484,10 @@ async def predict(
                 # 상태다. terrain(등고선 선)과 겹쳐 그리려면 예측을 다시 뒤집어 맞춘다.
                 inten = np.flipud(intensity_from_prediction(pred_img, terrain.shape))
                 r, c = np.unravel_index(int(np.argmax(inten)), inten.shape)
+                # 제목은 "AI 예측 배수맵" 한 줄만 둔다 (조건 부제목은 길어서 그림 밖으로 잘렸다.
+                # 강우·시간 조건은 웹 화면 결과 설명에 이미 나온다)
                 png = render_analysis_figure(
                     terrain, inten, effective_dx,
-                    subtitle=(f"지형 고저차 {float(np.ptp(terrain)):.1f}m · dx {effective_dx:.1f}m"
-                              + (f" · 강우 {rain_mm:.0f}mm · 경과 {time_s:.0f}s"
-                                 if cond_dim == 2 else "")
-                              + " · 회색 음영 = 실제 지형 굴곡"),
                     mark_idx=(int(r), int(c)),
                 )
             analysis_b64 = base64.b64encode(png).decode("ascii")
@@ -507,6 +536,8 @@ async def predict(
         "analysis_png_base64": analysis_b64,
         "map_jpg_base64": map_b64,
         "stats": stats,
+        "grid3d": _grid3d(contour_img, pred_img, terrain if mode == "terrain" else None,
+                          effective_dx if mode == "terrain" else None),
         "drain_candidate": drain,
         "checkpoint": os.path.basename(str(current_checkpoint())),
         "meta": meta,
@@ -521,6 +552,70 @@ async def predict(
 # --------------------------------------------------------------------------- #
 # 헬퍼
 # --------------------------------------------------------------------------- #
+GRID3D_N = 96                       # 3D 보기용 격자 한 변 (학습 격자와 같은 96)
+_HEIGHT_CACHE: dict[str, np.ndarray] = {}   # 시점별 예측(같은 지형 6~7번 요청)에서 높이 복원을 한 번만 하도록
+
+
+def _u16_b64(arr01: np.ndarray, scale: float) -> str:
+    """0 이상 실수 배열 -> uint16(리틀엔디언) base64. 화면이 Uint16Array 로 바로 읽는다."""
+    q = np.clip(np.rint(np.asarray(arr01, dtype=np.float64) * scale), 0, 65535).astype("<u2")
+    return base64.b64encode(q.tobytes()).decode("ascii")
+
+
+def _grid3d(contour_img: Image.Image, pred_img: Image.Image,
+            terrain: np.ndarray | None, dx: float | None) -> dict | None:
+    """웹 화면의 3D 지형 보기용 격자. 실패해도 예측 자체는 돌려줘야 하므로 None 으로 넘긴다.
+
+    둘 다 '그림 방향'(0행 = 화면 위쪽, 입력 등고선·예측 그림과 같은 방향)이다.
+      height_u16 : 높이 0..1 정규화 x 65535      (GRID3D_N x GRID3D_N, 행 우선)
+      depth_u16  : 수심[m] / depth_unit_m          (같은 격자)
+    데이터 모드는 실제 고도 격자를 쓰고, 이미지 모드는 모델에 넣은 등고선 그림의 색을 높이로 되읽는다.
+    """
+    try:
+        import hashlib
+
+        from scipy.ndimage import gaussian_filter
+        from src.inference_api import _image_to_depth
+
+        n = GRID3D_N
+        relief_m = extent_m = None
+        if terrain is not None:
+            t = np.nan_to_num(np.ascontiguousarray(np.flipud(np.asarray(terrain, dtype=np.float32))))
+            h = np.asarray(Image.fromarray(t).resize((n, n), Image.BILINEAR), dtype=np.float64)
+            relief_m = round(float(h.max() - h.min()), 2)
+            if dx:
+                extent_m = round(float(max(terrain.shape) * dx), 1)
+        else:
+            small = contour_img.convert("RGB").resize((cc.WORK_SIZE, cc.WORK_SIZE), Image.BILINEAR)
+            key = hashlib.md5(small.tobytes()).hexdigest()
+            h = _HEIGHT_CACHE.get(key)
+            if h is None:
+                hh, _frac = cc._to_height(contour_img, "terrain")
+                # 채색이 20단계라 계단처럼 읽힌다 -> 살짝 뭉개서 완만한 면으로 만든다
+                hh = gaussian_filter(hh.astype(np.float32), sigma=cc.WORK_SIZE / n * 1.6)
+                h = np.asarray(Image.fromarray(hh).resize((n, n), Image.BILINEAR), dtype=np.float64)
+                if len(_HEIGHT_CACHE) >= 8:
+                    _HEIGHT_CACHE.pop(next(iter(_HEIGHT_CACHE)))
+                _HEIGHT_CACHE[key] = h
+        lo, hi = float(h.min()), float(h.max())
+        hn = (h - lo) / (hi - lo) if hi - lo > 1e-9 else np.zeros_like(h)
+
+        depth = _image_to_depth(pred_img.resize((n, n), Image.BICUBIC))   # 그림 방향 수심[m]
+        unit = 1e-4                                                       # 0.1mm 단위 (최대 6.5m)
+        return {
+            "n": n,
+            "height_u16": _u16_b64(hn, 65535.0),
+            "depth_u16": _u16_b64(np.clip(depth, 0.0, None), 1.0 / unit),
+            "depth_unit_m": unit,
+            "max_depth_m": round(float(np.max(depth)), 4),
+            "relief_m": relief_m,
+            "extent_m": extent_m,
+        }
+    except Exception as exc:  # noqa: BLE001  (3D 는 부가 기능: 실패해도 예측 결과는 그대로 준다)
+        print(f"[grid3d] 3D 격자를 만들지 못했습니다: {exc!r}")
+        return None
+
+
 def _render_contour(terrain: np.ndarray, dx: float) -> Image.Image:
     ny, nx = terrain.shape
     xs = np.arange(nx) * dx

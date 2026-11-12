@@ -24,6 +24,9 @@ matplotlib.rcParams["font.family"] = [
     "Malgun Gothic", "AppleGothic", "NanumGothic", "Noto Sans CJK KR", "sans-serif",
 ]
 matplotlib.rcParams["axes.unicode_minus"] = False
+# 맑은 고딕이 있으면 그걸 쓰고, 없는 Mac/Linux 용 후보 글꼴마다 찍히는 "findfont ... not found" 경고는 숨긴다.
+import logging as _logging
+_logging.getLogger("matplotlib.font_manager").setLevel(_logging.ERROR)
 matplotlib.rcParams["figure.facecolor"] = "white"
 
 UPSCALE = 4
